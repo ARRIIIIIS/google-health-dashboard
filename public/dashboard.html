@@ -1,0 +1,170 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>健康仪表盘</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'SF Pro Display', 'PingFang SC', sans-serif;
+      background: linear-gradient(135deg, #f5f7fa 0%, #eef1f6 100%);
+      color: #1d1d1f; min-height: 100vh;
+    }
+    .wrap { max-width: 420px; margin: 0 auto; padding: 28px 20px; }
+    .card {
+      background: rgba(255,255,255,0.92);
+      backdrop-filter: blur(24px);
+      border-radius: 20px;
+      box-shadow: 0 8px 32px rgba(0,0,0,0.08);
+      padding: 22px;
+    }
+    .loading { text-align: center; color: #86868b; padding: 40px; font-size: 14px; }
+    .header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 18px; }
+    .header .title { font-size: 17px; font-weight: 700; color: #1d1d1f; }
+    .header .time { font-size: 12px; color: #86868b; margin-left: 8px; font-weight: 400; }
+    .refresh-btn {
+      width: 30px; height: 30px; border-radius: 50%; background: #f0f0f3;
+      display: flex; align-items: center; justify-content: center;
+      cursor: pointer; color: #86868b; font-size: 15px; font-weight: 700;
+      border: none; transition: transform .3s;
+    }
+    .refresh-btn:hover { background: #e6e6ea; }
+    .refresh-btn.spin { animation: spin 1s linear infinite; }
+    @keyframes spin { to { transform: rotate(360deg); } }
+    .ring-wrap { display: flex; justify-content: center; margin-bottom: 20px; }
+    .ring-label { font-size: 22px; font-weight: 800; fill: #1d1d1f; }
+    .ring-sub { font-size: 12px; fill: #86868b; }
+    .cards { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-bottom: 14px; }
+    .metric {
+      background: #fafafc; border-radius: 14px; padding: 14px;
+      border-left: 3px solid #007aff;
+    }
+    .metric .m-icon {
+      width: 24px; height: 24px; border-radius: 50%; display: inline-flex;
+      align-items: center; justify-content: center; font-size: 13px; font-weight: 700;
+      margin-bottom: 8px;
+    }
+    .metric .m-label { font-size: 11px; color: #86868b; }
+    .metric .m-value { font-size: 22px; font-weight: 700; color: #1d1d1f; margin-top: 2px; }
+    .metric .m-unit { font-size: 12px; font-weight: 400; color: #86868b; }
+    .tip {
+      border-radius: 12px; padding: 12px; font-size: 13px; line-height: 1.5;
+      background: #e8f5e9; color: #1b5e20;
+    }
+    .tip.warn { background: #fff3e0; color: #7a4100; }
+    .tip.alert { background: #ffebee; color: #a50009; }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <div class="card" id="widget">
+      <div class="loading">加载数据中...</div>
+    </div>
+  </div>
+
+  <script>
+    const REFRESH_MS = 300000; // 5 分钟
+    let timer = null;
+
+    const C = {
+      label: '#1d1d1f', second: '#86868b', outline: '#e6e6ea',
+      card: '#fafafc',
+      blue: '#007aff', blueBg: '#e6f0ff',
+      green: '#34c759', greenBg: '#e4f8ea',
+      red: '#ff3b30', redBg: '#ffe9e7',
+      cyan: '#00bcd4', cyanBg: '#e0f7fa',
+      purple: '#af52de', purpleBg: '#f3e8fc',
+      tipGood: '#e8f5e9', tipGoodTxt: '#1b5e20',
+      tipWarn: '#fff3e0', tipWarnTxt: '#7a4100',
+      tipAlert: '#ffebee', tipAlertTxt: '#a50009'
+    };
+
+    async function fetchData() {
+      try {
+        const res = await fetch('/api/data');
+        return await res.json();
+      } catch (e) { return null; }
+    }
+    function fmtNum(n) { return n ? Number(n).toLocaleString('zh') : null; }
+    function fmtSleep(min) {
+      if (!min) return null;
+      return Math.floor(min/60) + 'h' + (min%60 ? (min%60)+'m' : '');
+    }
+
+    function Ring(value, max, sz, color, track) {
+      const r = (sz - 14) / 2;
+      const circ = 2 * Math.PI * r;
+      const pct = Math.min(1, Math.max(0, value / max));
+      const off = circ * (1 - pct);
+      return `
+        <svg width="${sz}" height="${sz}" style="transform:rotate(-90deg)">
+          <circle cx="${sz/2}" cy="${sz/2}" r="${r}" fill="none" stroke="${track}" stroke-width="11" opacity="0.5"/>
+          <circle cx="${sz/2}" cy="${sz/2}" r="${r}" fill="none" stroke="${color}" stroke-width="11"
+                  stroke-linecap="round" stroke-dasharray="${circ}" stroke-dashoffset="${off}"/>
+          <text x="50%" y="46%" text-anchor="middle" class="ring-label">${fmtNum(value)||'--'}</text>
+          <text x="50%" y="60%" text-anchor="middle" class="ring-sub">${value>=max?'达成目标 🎉':'目标 '+fmtNum(max)}</text>
+        </svg>`;
+    }
+
+    function Metric(accent, bg, iconColor, icon, label, value, unit) {
+      return `
+        <div class="metric" style="border-left-color:${accent}">
+          <div class="m-icon" style="background:${bg};color:${iconColor}">${icon}</div>
+          <div class="m-label">${label}</div>
+          <div class="m-value">${value != null ? value : '--'}<span class="m-unit"> ${unit||''}</span></div>
+        </div>`;
+    }
+
+    async function render() {
+      const el = document.getElementById('widget');
+      const data = await fetchData();
+      if (!data || !data.today) {
+        el.innerHTML = '<div class="loading">数据获取失败，请确认数据服务已启动</div>';
+        return;
+      }
+      const t = data.today;
+      const steps = t.steps_total || t.steps || 0;
+      const goal = 8000;
+      const tipClass = t.tip_level === 'alert' ? 'alert' : (t.tip_level === 'warn' ? 'warn' : '');
+      const tipBg = t.tip_level === 'alert' ? C.tipAlert : (t.tip_level === 'warn' ? C.tipWarn : C.tipGood);
+      const tipTxt = t.tip_level === 'alert' ? C.tipAlertTxt : (t.tip_level === 'warn' ? C.tipWarnTxt : C.tipGoodTxt);
+
+      el.innerHTML = `
+        <div class="header">
+          <div class="title">健康仪表盘<span class="time">${t.updated_at||''}</span></div>
+          <button class="refresh-btn" onclick="refresh()" title="刷新">↻</button>
+        </div>
+        <div class="ring-wrap">
+          ${Ring(steps, goal, 132, steps>=goal?C.green:C.blue, steps>=goal?C.greenBg:C.blueBg)}
+        </div>
+        <div class="cards">
+          ${Metric(C.red, C.redBg, C.red, '♥', '心率', t.heart_rate_bpm!=null?t.heart_rate_bpm:t.resting_hr, 'bpm')}
+          ${Metric(C.blue, C.blueBg, C.blue, 'H', 'HRV', t.hrv, 'ms')}
+          ${Metric(C.cyan, C.cyanBg, C.cyan, 'O', '血氧', t.spo2, '%')}
+          ${Metric(C.purple, C.purpleBg, C.purple, 'Z', '睡眠', fmtSleep(t.sleep_asleep_min), '')}
+        </div>
+        <div class="tip" style="background:${tipBg};color:${tipTxt}">${t.tip || '数据正常'}</div>
+      `;
+    }
+
+    async function refresh() {
+      const btn = document.querySelector('.refresh-btn');
+      if (btn) { btn.classList.add('spin'); }
+      try { await fetch('/api/refresh'); } catch(e) {}
+      await new Promise(r => setTimeout(r, 2500));
+      await render();
+      if (btn) { btn.classList.remove('spin'); }
+    }
+
+    async function loop() {
+      if (timer) clearTimeout(timer);
+      try { await fetch('/api/refresh'); } catch(e) {}
+      await new Promise(r => setTimeout(r, 2500));
+      await render();
+      timer = setTimeout(loop, REFRESH_MS);
+    }
+    loop();
+  </script>
+</body>
+</html>

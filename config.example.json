@@ -1,0 +1,13 @@
+{
+  "google": {
+    "client_id": "在此填写你的 Google OAuth 客户端 ID",
+    "client_secret": "在此填写你的 Google OAuth 客户端密钥",
+    "refresh_token": "",
+    "redirect_uri": "http://127.0.0.1:8911/oauth/callback"
+  },
+  "proxy": null,
+  "ports": {
+    "data": 8910,
+    "widget": 8911
+  }
+}

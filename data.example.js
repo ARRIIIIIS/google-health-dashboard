@@ -1,0 +1,31 @@
+const HEALTH_DATA = {
+  "today": {
+    "date": "2026-08-12",
+    "updated_at": "09:00",
+    "steps": 6420,
+    "distance": 4.8,
+    "calories": 1850,
+    "azm_fat": 22,
+    "azm_card": 4,
+    "azm_peak": 0,
+    "active_minutes": 26,
+    "resting_hr": 68.0,
+    "hrv": 42.3,
+    "spo2": 97.1,
+    "respiratory_rate": 14,
+    "sleep_asleep_min": 452,
+    "sleep_awake_min": 18,
+    "sleep_light_min": 270,
+    "sleep_deep_min": 78,
+    "sleep_rem_min": 104,
+    "sleep_bedtime": "23:42",
+    "sleep_wakeup": "07:14",
+    "tip": "早安，新的一天从活动开始 ☀️",
+    "tip_level": "good",
+    "sedentary": false,
+    "follow_up": false,
+    "snooze_until": 0,
+    "pending_notify": false
+  },
+  "history": []
+};

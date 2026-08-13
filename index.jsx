@@ -1,0 +1,292 @@
+export const command = "curl -s 'http://127.0.0.1:8910/api/data'"
+export const showOnAllScreens = false
+export const showOnMainScreen = true
+export const refreshFrequency = 600000
+
+export const className = `
+  top: 36px;
+  left: 16px;
+  width: 344px;
+  height: 254px;
+  font-family: -apple-system, BlinkMacSystemFont, 'SF Pro Display', 'SF Pro Text', sans-serif;
+  user-select: none;
+  overflow: hidden;
+`
+
+// ── Bold saturation palette ─────────────────────────────────────────────────
+const C = {
+  base:     '#ffffff',
+  cardBg:   '#fafafa',     // pill 灰色底
+  outline:  '#e5e5ea',
+  label:    '#1d1d1f',
+  second:   '#4f4f55',
+  third:    '#9b9ba0',
+
+  // 饱和主色（参考 Google Health 风格）
+  green:    '#1e8a4c',  greenBg:    '#c9ecd2',  greenLite: '#e6f3ea',
+  red:      '#ff453a',  redEnd:     '#ff2d55',
+  blue:     '#1a73e8',  blueBg:     '#d4e3fc',
+  purple:   '#7c4dff',  purpleBg:   '#e2d6f9',
+  orange:   '#ff9500',  orangeBg:   '#ffe4b3',
+  cyan:     '#129eaf',  cyanBg:     '#d1f0f4',
+
+  tipGood:  '#d1f4d8',  tipGoodTxt:  '#0b5a1e',
+  tipWarn:  '#ffe4b3',  tipWarnTxt:  '#7a4100',
+  tipAlert: '#ffd1cd',  tipAlertTxt: '#a50009',
+}
+
+// ── Helpers ──────────────────────────────────────────────────────────────────
+function fmtNum(n) { return n ? Number(n).toLocaleString('zh') : null }
+function fmtTime(d) {
+  return String(d.getHours()).padStart(2,'0') + ':' + String(d.getMinutes()).padStart(2,'0')
+}
+function fmtSleep(min) {
+  if (!min) return null
+  return Math.floor(min/60) + 'h' + (min%60 ? min%60+'m' : '')
+}
+
+// ── Bold Ring (thick, rounded, saturated) ───────────────────────────────────
+function Ring({ value, max, sz, color, trackColor, label, sub }) {
+  sz  = sz || 110
+  const sw   = 9
+  const r    = (sz - sw) / 2
+  const circ = 2 * Math.PI * r
+  const pct  = Math.min(100, (value || 0) / max * 100)
+  const dash = pct / 100 * circ
+  const innerPx = Math.min(22, Math.max(15, Math.floor(sz * 0.22)))
+  return (
+    <div style={{position:'relative',width:sz,height:sz,flexShrink:0}}>
+      <svg width={sz} height={sz} style={{transform:'rotate(-90deg)',display:'block'}}>
+        <circle cx={sz/2} cy={sz/2} r={r} fill='none' stroke={trackColor} strokeWidth={sw}/>
+        <circle cx={sz/2} cy={sz/2} r={r} fill='none'
+          stroke={color} strokeWidth={sw}
+          strokeDasharray={dash + ' ' + (circ - dash)}
+          strokeLinecap='round'/>
+      </svg>
+      <div style={{position:'absolute',inset:0,display:'flex',flexDirection:'column',
+                   alignItems:'center',justifyContent:'center',gap:1}}>
+        <span style={{fontSize:8,color:C.second,fontWeight:600,letterSpacing:0.3}}>{label}</span>
+        <span style={{fontSize:innerPx,fontWeight:700,color:C.label,lineHeight:1,
+                     maxWidth:sz-14,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>
+          {value != null ? value : '—'}
+        </span>
+        <span style={{fontSize:7.5,color:C.third,fontWeight:600}}>{sub}</span>
+      </div>
+    </div>
+  )
+}
+
+// ── Metric card: bold color side-bar + saturated translucent fill ────────────
+function Card({ accentColor, icon, iconBg, iconColor, value, unit, label }) {
+  return (
+    <div style={{position:'relative',background:C.cardBg,
+                 borderRadius:14,overflow:'hidden',
+                 display:'flex',alignItems:'center',gap:7,
+                 padding:'7px 9px 7px 8px',flex:1,minWidth:0}}>
+      {/* 左侧粗彩条 */}
+      <div style={{position:'absolute',left:0,top:0,bottom:0,width:5,
+                   background:accentColor,
+                   borderTopLeftRadius:14,borderBottomLeftRadius:14}}/>
+      {/* 半透明饱和色填充 */}
+      <div style={{position:'absolute',inset:0,background:iconBg,opacity:0.5,
+                   pointerEvents:'none'}}/>
+      <div style={{position:'relative',zIndex:1,
+                   width:28,height:28,borderRadius:'50%',
+                   background:iconBg,
+                   display:'flex',alignItems:'center',justifyContent:'center',
+                   flexShrink:0,fontSize:13,fontWeight:700,color:iconColor,lineHeight:1}}>
+        {icon}
+      </div>
+      <div style={{position:'relative',zIndex:1,flex:1,minWidth:0,overflow:'hidden'}}>
+        <div style={{fontSize:14,fontWeight:700,color:C.label,lineHeight:1.1,
+                     whiteSpace:'nowrap',overflow:'hidden',textOverflow:'ellipsis'}}>
+          {value != null ? value : '—'}
+          <span style={{fontSize:9,fontWeight:500,color:C.second,marginLeft:1.5}}>{unit}</span>
+        </div>
+        <div style={{fontSize:8.5,color:C.second,marginTop:2,
+                     whiteSpace:'nowrap',overflow:'hidden',textOverflow:'ellipsis',
+                     fontWeight:500,letterSpacing:0.2}}>
+          {label}
+        </div>
+      </div>
+    </div>
+  )
+}
+
+// ── Sleep bar (rounded segments, saturated) ─────────────────────────────────
+function SleepBar({ asleep, awake, light, deep, rem }) {
+  const phases = [
+    {k:'awake',v:awake||0,c:C.third,    n:'清醒'},
+    {k:'light',v:light||0,c:'#5ac8fa',  n:'浅睡'},
+    {k:'deep', v:deep||0, c:C.green,    n:'深睡'},
+    {k:'rem',  v:rem||0,  c:C.purple,  n:'REM'},
+  ]
+  return (
+    <div style={{background:'#f7f5fc',borderRadius:14,
+                 padding:'8px 10px 7px',marginTop:-22}}>
+      <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:6}}>
+        <span style={{fontSize:9,fontWeight:700,color:C.label,paddingLeft:2}}>睡眠</span>
+        <span style={{fontSize:9,fontWeight:600,color:C.second,paddingRight:2}}>{fmtSleep(asleep)||'—'}</span>
+      </div>
+      <div style={{display:'flex',height:7,borderRadius:3.5,overflow:'hidden',gap:1.5,marginBottom:6}}>
+        {phases.map(function(p){return(
+          <div key={p.k} style={{flex:p.v||0.4,height:'100%',background:p.c,
+                                 borderRadius:3.5,
+                                 opacity:asleep?1:0.22}}/>
+        )})}
+      </div>
+      <div style={{display:'flex',gap:10,fontSize:8,color:C.second,fontWeight:500,paddingLeft:2}}>
+        {phases.map(function(p){return(
+          <span key={p.k} style={{display:'flex',alignItems:'center',gap:3}}>
+            <span style={{width:4.5,height:4.5,borderRadius:'50%',background:p.c,flexShrink:0}}/>
+            {p.n}
+          </span>
+        )})}
+      </div>
+    </div>
+  )
+}
+
+// ── Active pill (no progress bar) ───────────────────────────────────────────
+function ActivePill({ minutes }) {
+  return (
+    <div style={{background:C.greenBg,borderRadius:12,
+                 display:'flex',alignItems:'center',justifyContent:'center',
+                 padding:'4px 9px',gap:3,marginTop:3}}>
+      <span style={{fontSize:11,fontWeight:700,color:C.green,lineHeight:1}}>
+        {minutes != null ? minutes : '—'}
+      </span>
+      <span style={{fontSize:7.5,fontWeight:600,color:C.green}}>min 活跃</span>
+    </div>
+  )
+}
+
+// ── Tip pill (saturated blocks) ─────────────────────────────────────────────
+function Tip({ tip, level, style }) {
+  const bg = level==='alert'?C.tipAlert : level==='warn'?C.tipWarn : C.tipGood
+  const fg = level==='alert'?C.tipAlertTxt: level==='warn'?C.tipWarnTxt: C.tipGoodTxt
+  const dot = level==='alert'?'!': level==='warn'?'⚠':'✓'
+  return (
+    <div style={{display:'flex',alignItems:'flex-start',gap:5,
+                 background:bg,borderRadius:10,padding:'6px 10px',
+                 ...(style||{})}}>
+      <span style={{width:12,height:12,borderRadius:'50%',
+                    background:'rgba(255,255,255,0.55)',
+                    display:'flex',alignItems:'center',justifyContent:'center',
+                    fontSize:9,fontWeight:800,color:fg,flexShrink:0}}>{dot}</span>
+      <span style={{fontSize:9,fontWeight:600,color:fg,lineHeight:1.35,
+                    flex:1,overflow:'hidden',display:'-webkit-box',
+                    WebkitLineClamp:2,WebkitBoxOrient:'vertical'}}>{tip}</span>
+    </div>
+  )
+}
+
+// ── Render ───────────────────────────────────────────────────────────────────
+export const render = function({ output, refresh }) {
+  let data = {}
+  try { data = JSON.parse(output || '{}') } catch(e) {}
+
+  const t = data.today || {}
+  const steps   = t.steps || 0
+  const active  = t.active_minutes || 0
+  const resting = t.resting_hr
+  const hrv     = t.hrv
+  const spo2    = t.spo2
+  const resp    = t.respiratory_rate
+  const sleep   = t.sleep_asleep_min || 0
+  const tip     = t.tip
+  const level   = t.tip_level || 'good'
+  const updated = t.updated_at
+
+  const now   = new Date()
+  const h     = now.getHours()
+  const m     = now.getMinutes()
+  const inWork = (h >= 10 && h < 12) || (h === 13 && m >= 30) || (h > 13 && h < 19)
+
+  const stepSub = steps >= 8000 ? '✓达成' : '目标8k'
+
+  return (
+    <div style={{background:C.base,borderRadius:22,width:'100%',height:'100%',
+                 boxSizing:'border-box',padding:'9px 11px 9px',
+                 display:'flex',flexDirection:'column',gap:1,
+                 boxShadow:'0 2px 8px rgba(0,0,0,0.08), 0 8px 24px rgba(0,0,0,0.06)'}}>
+
+      {/* Header */}
+      <div style={{display:'flex',alignItems:'center',gap:8,paddingLeft:2}}>
+        {/* 渐变红心 Icon */}
+        <div style={{width:22,height:22,borderRadius:'50%',
+                     background:'linear-gradient(135deg,#ff453a,#ff2d55)',
+                     display:'flex',alignItems:'center',justifyContent:'center',
+                     flexShrink:0,boxShadow:'0 1px 3px rgba(255,45,85,0.4)'}}>
+          <svg width="12" height="11" viewBox="0 0 13 12" fill="#ffffff">
+            <path d="M6.5 11.2C6.2 11.2 5.9 11.1 5.7 10.9L0.7 6.2C-0.3 4.9 -0.3 3.1 0.7 1.8 1.5 0.7 2.8 0 4.3 0 5.1 0 5.8 0.3 6.5 0.7 7.2 0.3 7.9 0 8.7 0 10.2 0 11.5 0.7 12.3 1.8 13.3 3.1 13.3 4.9 12.3 6.2L7.3 10.9C7.1 11.1 6.8 11.2 6.5 11.2Z"/>
+          </svg>
+        </div>
+        <span style={{fontSize:12,fontWeight:700,color:C.label,letterSpacing:-0.2}}>健康</span>
+
+        {/* 实心饱和 工作中徽章 */}
+        <div style={{background: inWork ? C.green : C.outline,
+                     borderRadius:100, padding:'2.5px 8px',
+                     display:'flex',alignItems:'center'}}>
+          <span style={{fontSize:8.5,fontWeight:700,
+                        color: inWork ? '#ffffff' : C.second,
+                        letterSpacing:0.3,lineHeight:1}}>
+            {inWork ? '工作中' : '休息中'}
+          </span>
+        </div>
+
+        <div style={{flex:1}}/>
+
+        <span style={{fontSize:8.5,fontWeight:500,color:C.third}}>{updated || fmtTime(now)}</span>
+
+        <div onMouseDown={async function(e){
+          e.preventDefault()
+          try{await fetch('http://127.0.0.1:8910/api/refresh')}catch(_){}
+          refresh()
+        }} title="刷新" style={{width:20,height:20,borderRadius:'50%',background:C.outline,
+          display:'flex',alignItems:'center',justifyContent:'center',
+          cursor:'pointer',flexShrink:0,color:C.second,fontSize:11,fontWeight:700}}>
+          ↻
+        </div>
+      </div>
+
+      {/* Body: ring column + 2x2 cards column */}
+      <div style={{display:'flex',gap:11,flex:1,minHeight:0,alignItems:'stretch',marginTop:-20}}>
+
+        {/* Left: ring + active below */}
+        <div style={{display:'flex',flexDirection:'column',alignItems:'center',
+                     justifyContent:'center',flexShrink:0}}>
+          <Ring value={steps>0 ? fmtNum(steps).replace(/,/g,'') : null}
+                max={8000} sz={82}
+                color={C.green} trackColor={C.greenBg}
+                label="步数" sub={stepSub}/>
+          <ActivePill minutes={active}/>
+        </div>
+
+        {/* Right: 2×2 cards */}
+        <div style={{display:'flex',flexDirection:'column',gap:7,flex:1,minWidth:0,
+                     justifyContent:'center'}}>
+          <div style={{display:'flex',gap:7}}>
+            <Card accentColor={C.red}    icon='♥'  iconBg={C.tipAlert} iconColor={C.red}
+                  value={resting} label="心率"  unit="bpm"/>
+            <Card accentColor={C.blue}   icon='H'  iconBg={C.blueBg}   iconColor={C.blue}
+                  value={hrv}     label="HRV"   unit="ms"/>
+          </div>
+          <div style={{display:'flex',gap:7}}>
+            <Card accentColor={C.cyan}   icon='O₂' iconBg={C.cyanBg}   iconColor={C.cyan}
+                  value={spo2}    label="血氧"  unit="%"/>
+            <Card accentColor={C.purple} icon='R'  iconBg={C.purpleBg} iconColor={C.purple}
+                  value={resp}    label="呼吸"  unit="/min"/>
+          </div>
+        </div>
+      </div>
+
+      {/* Sleep */}
+      <SleepBar asleep={sleep} awake={t.sleep_awake_min}
+                light={t.sleep_light_min} deep={t.sleep_deep_min} rem={t.sleep_rem_min}/>
+
+      {/* Tip */}
+      {tip && <Tip tip={tip} level={level} style={{marginTop:4}}/>}
+    </div>
+  )
+}

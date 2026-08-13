@@ -1,0 +1,14 @@
+# 个人凭据与数据（绝不入库）
+config.json
+tokens.json
+data.js
+
+# 运行时日志
+*.log
+
+# Python
+__pycache__/
+*.pyc
+
+# 系统文件
+.DS_Store
