@@ -15,7 +15,7 @@
 ## 准备条件
 
 1. **穿戴设备** — Fitbit 手环/手表，或任何同步到 Google Health/Health Connect 的设备
-2. **Mac**（Linux 也可）
+2. **macOS** — 桌面组件依赖 [Übersicht](http://tracesof.net/uebersicht/)（macOS 专属），启动脚本使用 `open` 命令；Linux/Windows 未测试
 3. **网络环境** — 能访问 Google（国内需科学上网代理）
 4. **Python 3 + Node.js**
 

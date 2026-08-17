@@ -36,6 +36,9 @@
   "engines": {
     "node": ">=14"
   },
+  "os": [
+    "darwin"
+  ],
   "dependencies": {},
   "private": false
 }
