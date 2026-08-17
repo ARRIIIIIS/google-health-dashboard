@@ -10,5 +10,10 @@ data.js
 __pycache__/
 *.pyc
 
+# Node
+node_modules/
+package-lock.json
+npm-debug.log*
+
 # 系统文件
 .DS_Store
