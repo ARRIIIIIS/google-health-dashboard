@@ -76,8 +76,38 @@ function Ring({ value, max, sz, color, trackColor, label, sub }) {
   )
 }
 
+// ── Mini sparkline (breaks on null gaps) ────────────────────────────────────
+function Spark({ data, color, w, h }) {
+  w = w || 36; h = h || 18
+  const pts = (data || []).map(function(v, i){ return v == null ? null : { i, v } })
+  const vals = pts.filter(function(p){ return p })
+  if (vals.length < 2) return null
+  const min = Math.min.apply(null, vals.map(function(p){ return p.v }))
+  const max = Math.max.apply(null, vals.map(function(p){ return p.v }))
+  const range = (max - min) || 1
+  const x = function(i){ return i / (pts.length - 1 || 1) * (w - 6) + 3 }
+  const y = function(v){ return h - 3 - (v - min) / range * (h - 6) }
+  let segs = [], cur = []
+  pts.forEach(function(p){
+    if (p) cur.push(x(p.i).toFixed(1) + ',' + y(p.v).toFixed(1))
+    else { if (cur.length > 1) segs.push(cur); cur = [] }
+  })
+  if (cur.length > 1) segs.push(cur)
+  const last = vals[vals.length - 1]
+  return (
+    <svg width={w} height={h} style={{flexShrink:0, display:'block', alignSelf:'center'}}>
+      {segs.map(function(s, si){
+        return <polyline key={si} points={s.join(' ')} fill='none' stroke={color}
+                 strokeWidth={1.5} strokeLinecap='round' strokeLinejoin='round'
+                 opacity={0.85}/>
+      })}
+      <circle cx={x(last.i).toFixed(1)} cy={y(last.v).toFixed(1)} r={1.8} fill={color}/>
+    </svg>
+  )
+}
+
 // ── Metric card: bold color side-bar + saturated translucent fill ────────────
-function Card({ accentColor, icon, iconBg, iconColor, value, unit, label }) {
+function Card({ accentColor, icon, iconBg, iconColor, value, unit, label, right }) {
   return (
     <div style={{position:'relative',background:C.cardBg,
                  borderRadius:14,overflow:'hidden',
@@ -109,6 +139,7 @@ function Card({ accentColor, icon, iconBg, iconColor, value, unit, label }) {
           {label}
         </div>
       </div>
+      {right}
     </div>
   )
 }
@@ -203,7 +234,26 @@ export const render = function({ output, refresh }) {
   const m     = now.getMinutes()
   const inWork = (h >= 10 && h < 12) || (h === 13 && m >= 30) || (h > 13 && h < 19)
 
-  const stepSub = steps >= 8000 ? '✓达成' : '目标8k'
+  // ── 7-day trend (exclude today) ───────────────────────────────────────────
+  const hist = Array.isArray(data.history) ? data.history : []
+  const prior = hist.filter(function(e){ return e.date && e.date !== t.date })
+  const stepAvg = prior.length >= 2
+    ? prior.map(function(e){ return e.steps || 0 })
+          .reduce(function(a, b){ return a + b }, 0) / prior.length
+    : null
+  const stepDiff = stepAvg ? Math.round((steps - stepAvg) / stepAvg * 100) : null
+  const stepSub = stepDiff == null
+    ? (steps >= 8000 ? '✓达成' : '目标8k')
+    : (steps >= 8000 ? '✓ ' : '') + '7日均' + (stepAvg/1000).toFixed(1) + 'k ' +
+      (stepDiff >= 0 ? '↑' : '↓') + Math.abs(stepDiff) + '%'
+
+  // sparkline series: history + today (if present)
+  const rhrSeries = hist.map(function(e){ return e.resting_hr })
+  if (resting != null) rhrSeries.push(resting)
+  const hrvSeries = hist.map(function(e){ return e.hrv })
+  if (hrv != null) hrvSeries.push(hrv)
+  const spo2Series = hist.map(function(e){ return e.spo2 })
+  if (spo2 != null) spo2Series.push(spo2)
 
   return (
     <div style={{background:C.base,borderRadius:22,width:'100%',height:'100%',
@@ -268,13 +318,16 @@ export const render = function({ output, refresh }) {
                      justifyContent:'center'}}>
           <div style={{display:'flex',gap:7}}>
             <Card accentColor={C.red}    icon='♥'  iconBg={C.tipAlert} iconColor={C.red}
-                  value={resting} label="心率"  unit="bpm"/>
+                  value={resting} label="心率"  unit="bpm"
+                  right={<Spark data={rhrSeries} color={C.red}/>}/>
             <Card accentColor={C.blue}   icon='H'  iconBg={C.blueBg}   iconColor={C.blue}
-                  value={hrv}     label="HRV"   unit="ms"/>
+                  value={hrv}     label="HRV"   unit="ms"
+                  right={<Spark data={hrvSeries} color={C.blue}/>}/>
           </div>
           <div style={{display:'flex',gap:7}}>
             <Card accentColor={C.cyan}   icon='O₂' iconBg={C.cyanBg}   iconColor={C.cyan}
-                  value={spo2}    label="血氧"  unit="%"/>
+                  value={spo2}    label="血氧"  unit="%"
+                  right={<Spark data={spo2Series} color={C.cyan}/>}/>
             <Card accentColor={C.purple} icon='R'  iconBg={C.purpleBg} iconColor={C.purple}
                   value={resp}    label="呼吸"  unit="/min"/>
           </div>
