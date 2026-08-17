@@ -7,7 +7,7 @@ export const className = `
   top: 36px;
   left: 16px;
   width: 344px;
-  height: 254px;
+  height: 272px;
   font-family: -apple-system, BlinkMacSystemFont, 'SF Pro Display', 'SF Pro Text', sans-serif;
   user-select: none;
   overflow: hidden;
@@ -104,7 +104,7 @@ function Spark({ data, color, w, h, placeholder }) {
   const first = vals[0], last = vals[vals.length - 1]
   const avgY = y(avg).toFixed(1)
   return (
-    <svg width={w} height={h} style={{flexShrink:0, display:'block', alignSelf:'center'}}>
+    <svg width={w} height={h} style={{flexShrink:0, display:'block', alignSelf:'center', pointerEvents:'none'}}>
       {/* 平均基线 */}
       <line x1={2} y1={avgY} x2={w-2} y2={avgY}
             stroke={color} strokeWidth={0.6} strokeDasharray='2 1.5' opacity={0.45}/>
@@ -243,8 +243,9 @@ function DetailOverlay({ focus, history, today, onClose }) {
 // ── Metric card: bold color side-bar + saturated translucent fill ────────────
 function Card({ accentColor, icon, iconBg, iconColor, value, unit, label, right, onClick }) {
   return (
-    <div onMouseDown={onClick ? function(e){
-      e.preventDefault(); e.stopPropagation(); onClick(e)
+    <div onMouseDown={onClick ? async function(e){
+      e.preventDefault()
+      onClick(e)
     } : undefined}
          style={{position:'relative',background:C.cardBg,
                  borderRadius:14,overflow:'hidden',
@@ -292,7 +293,7 @@ function SleepBar({ asleep, awake, light, deep, rem }) {
   ]
   return (
     <div style={{background:'#f7f5fc',borderRadius:14,
-                 padding:'8px 10px 7px',marginTop:-22}}>
+                 padding:'8px 10px 7px',marginTop:-16}}>
       <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:6}}>
         <span style={{fontSize:9,fontWeight:700,color:C.label,paddingLeft:2}}>睡眠</span>
         <span style={{fontSize:9,fontWeight:600,color:C.second,paddingRight:2}}>{fmtSleep(asleep)||'—'}</span>
@@ -384,7 +385,7 @@ export const render = function({ output, refresh }) {
   const stepDiff = stepAvg ? Math.round((steps - stepAvg) / stepAvg * 100) : null
   const stepSub = stepDiff == null
     ? (steps >= 8000 ? '✓达成' : '目标8k')
-    : (steps >= 8000 ? '✓ ' : '') + '7日均' + (stepAvg/1000).toFixed(1) + 'k ' +
+    : (steps >= 8000 ? '✓ ' : '') + '均' + (stepAvg/1000).toFixed(1) + 'k ' +
       (stepDiff >= 0 ? '↑' : '↓') + Math.abs(stepDiff) + '%'
 
   // sparkline series: history + today (if present)
@@ -397,10 +398,9 @@ export const render = function({ output, refresh }) {
 
   // ── Click handlers: set focus then re-render ─────────────────────────────
   const focus = _focus
-  function pickFocus(metric){
+  async function pickFocus(metric){
     _focus = metric
-    // fire-and-forget: don't block the refresh
-    fetch('http://127.0.0.1:8910/api/focus/' + metric).catch(function(){})
+    try { await fetch('http://127.0.0.1:8910/api/focus/' + metric) } catch(_){}
     refresh()
   }
 
@@ -450,7 +450,7 @@ export const render = function({ output, refresh }) {
       </div>
 
       {/* Body: ring column + 2x2 cards column */}
-      <div style={{display:'flex',gap:11,flex:1,minHeight:0,alignItems:'stretch',marginTop:-20}}>
+      <div style={{display:'flex',gap:11,flex:1,minHeight:0,alignItems:'stretch',marginTop:-14}}>
 
         {/* Left: ring + active below */}
         <div style={{display:'flex',flexDirection:'column',alignItems:'center',
@@ -496,9 +496,9 @@ export const render = function({ output, refresh }) {
       {/* Detail overlay (when a heart metric card is clicked) */}
       {focus && ['heart','hrv','spo2'].indexOf(focus) >= 0 && (
         <DetailOverlay focus={focus} history={hist} today={t}
-          onClose={function(){
+          onClose={async function(){
             _focus = null
-            fetch('http://127.0.0.1:8910/api/focus/clear').catch(function(){})
+            try { await fetch('http://127.0.0.1:8910/api/focus/clear') } catch(_){}
             refresh()
           }}/>
       )}
