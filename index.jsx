@@ -122,7 +122,7 @@ function Spark({ data, color, w, h, placeholder }) {
 }
 
 // ── Detail overlay: 7-day line chart for clicked metric ────────────────────
-function DetailOverlay({ focus, history, today, onClose, refresh }) {
+function DetailOverlay({ focus, history, today, onClose }) {
   const META = {
     heart:  { field:'resting_hr', label:'静息心率', unit:'bpm', color:C.red,    today:today.resting_hr,  decimals:0 },
     hrv:    { field:'hrv',        label:'HRV',     unit:'ms',  color:C.blue,   today:today.hrv,         decimals:0 },
@@ -214,10 +214,9 @@ function DetailOverlay({ focus, history, today, onClose, refresh }) {
     )
   }
 
-  async function close(e){
+  function close(e){
     e && e.stopPropagation && e.stopPropagation()
-    try { await fetch('http://127.0.0.1:8910/api/focus/clear') } catch(_){}
-    if (refresh) refresh()
+    if (onClose) onClose()
   }
 
   return (
@@ -352,6 +351,8 @@ function Tip({ tip, level, style }) {
 }
 
 // ── Render ───────────────────────────────────────────────────────────────────
+var _focus = null   // module-level focus state (survives across re-renders)
+
 export const render = function({ output, refresh }) {
   let data = {}
   try { data = JSON.parse(output || '{}') } catch(e) {}
@@ -395,9 +396,11 @@ export const render = function({ output, refresh }) {
   if (spo2 != null) spo2Series.push(spo2)
 
   // ── Click handlers: set focus then re-render ─────────────────────────────
-  const focus = data.focus || null
-  async function pickFocus(metric){
-    try { await fetch('http://127.0.0.1:8910/api/focus/' + metric) } catch(_){}
+  const focus = _focus
+  function pickFocus(metric){
+    _focus = metric
+    // fire-and-forget: don't block the refresh
+    fetch('http://127.0.0.1:8910/api/focus/' + metric).catch(function(){})
     refresh()
   }
 
@@ -492,7 +495,12 @@ export const render = function({ output, refresh }) {
 
       {/* Detail overlay (when a heart metric card is clicked) */}
       {focus && ['heart','hrv','spo2'].indexOf(focus) >= 0 && (
-        <DetailOverlay focus={focus} history={hist} today={t} refresh={refresh}/>
+        <DetailOverlay focus={focus} history={hist} today={t}
+          onClose={function(){
+            _focus = null
+            fetch('http://127.0.0.1:8910/api/focus/clear').catch(function(){})
+            refresh()
+          }}/>
       )}
     </div>
   )
