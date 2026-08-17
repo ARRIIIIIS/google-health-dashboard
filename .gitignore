@@ -2,6 +2,7 @@
 config.json
 tokens.json
 data.js
+.focus
 
 # 运行时日志
 *.log

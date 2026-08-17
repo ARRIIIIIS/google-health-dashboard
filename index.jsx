@@ -70,21 +70,29 @@ function Ring({ value, max, sz, color, trackColor, label, sub }) {
                      maxWidth:sz-14,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>
           {value != null ? value : '—'}
         </span>
-        <span style={{fontSize:7.5,color:C.third,fontWeight:600}}>{sub}</span>
+        <span style={{fontSize:8.5,color:C.second,fontWeight:700,letterSpacing:0.2}}>{sub}</span>
       </div>
     </div>
   )
 }
 
-// ── Mini sparkline (breaks on null gaps) ────────────────────────────────────
-function Spark({ data, color, w, h }) {
+// ── Mini sparkline (breaks on null gaps, draws avg baseline) ───────────────
+function Spark({ data, color, w, h, placeholder }) {
   w = w || 36; h = h || 18
   const pts = (data || []).map(function(v, i){ return v == null ? null : { i, v } })
   const vals = pts.filter(function(p){ return p })
-  if (vals.length < 2) return null
+  if (vals.length < 2) {
+    return (
+      <div style={{width:w,height:h,display:'flex',alignItems:'center',justifyContent:'center',
+                   flexShrink:0, color:placeholder || C.third, fontSize:9, fontWeight:700}}>
+        ·
+      </div>
+    )
+  }
   const min = Math.min.apply(null, vals.map(function(p){ return p.v }))
   const max = Math.max.apply(null, vals.map(function(p){ return p.v }))
   const range = (max - min) || 1
+  const avg = vals.reduce(function(a,b){return a+b.v}, 0) / vals.length
   const x = function(i){ return i / (pts.length - 1 || 1) * (w - 6) + 3 }
   const y = function(v){ return h - 3 - (v - min) / range * (h - 6) }
   let segs = [], cur = []
@@ -93,26 +101,157 @@ function Spark({ data, color, w, h }) {
     else { if (cur.length > 1) segs.push(cur); cur = [] }
   })
   if (cur.length > 1) segs.push(cur)
-  const last = vals[vals.length - 1]
+  const first = vals[0], last = vals[vals.length - 1]
+  const avgY = y(avg).toFixed(1)
   return (
     <svg width={w} height={h} style={{flexShrink:0, display:'block', alignSelf:'center'}}>
+      {/* 平均基线 */}
+      <line x1={2} y1={avgY} x2={w-2} y2={avgY}
+            stroke={color} strokeWidth={0.6} strokeDasharray='2 1.5' opacity={0.45}/>
       {segs.map(function(s, si){
         return <polyline key={si} points={s.join(' ')} fill='none' stroke={color}
                  strokeWidth={1.5} strokeLinecap='round' strokeLinejoin='round'
-                 opacity={0.85}/>
+                 opacity={0.9}/>
       })}
-      <circle cx={x(last.i).toFixed(1)} cy={y(last.v).toFixed(1)} r={1.8} fill={color}/>
+      {/* 首点（淡灰）+ 末点（实色） */}
+      <circle cx={x(first.i).toFixed(1)} cy={y(first.v).toFixed(1)} r={1.4}
+              fill='none' stroke={color} strokeWidth={0.8} opacity={0.5}/>
+      <circle cx={x(last.i).toFixed(1)} cy={y(last.v).toFixed(1)} r={1.9} fill={color}/>
     </svg>
   )
 }
 
-// ── Metric card: bold color side-bar + saturated translucent fill ────────────
-function Card({ accentColor, icon, iconBg, iconColor, value, unit, label, right }) {
+// ── Detail overlay: 7-day line chart for clicked metric ────────────────────
+function DetailOverlay({ focus, history, today, onClose, refresh }) {
+  const META = {
+    heart:  { field:'resting_hr', label:'静息心率', unit:'bpm', color:C.red,    today:today.resting_hr,  decimals:0 },
+    hrv:    { field:'hrv',        label:'HRV',     unit:'ms',  color:C.blue,   today:today.hrv,         decimals:0 },
+    spo2:   { field:'spo2',       label:'血氧',    unit:'%',   color:C.cyan,   today:today.spo2,        decimals:1 },
+  }
+  const meta = META[focus]
+  if (!meta) return null
+  const series = (history || []).map(function(e){ return e[meta.field] })
+  if (meta.today != null) series.push(meta.today)
+  const pts = series.map(function(v, i){ return v == null ? null : { i, v } })
+  const vals = pts.filter(function(p){ return p })
+  const W = 280, H = 120, PAD = { l: 26, r: 8, t: 14, b: 18 }
+  const innerW = W - PAD.l - PAD.r, innerH = H - PAD.t - PAD.b
+
+  let svg
+  if (vals.length < 1) {
+    svg = <div style={{width:W,height:H,display:'flex',alignItems:'center',justifyContent:'center',
+                       color:C.third,fontSize:11,fontWeight:600}}>暂无数据</div>
+  } else {
+    const min = Math.min.apply(null, vals.map(function(p){return p.v}))
+    const max = Math.max.apply(null, vals.map(function(p){return p.v}))
+    const range = (max - min) || 1
+    const x = function(i){ return PAD.l + i / (pts.length - 1 || 1) * innerW }
+    const y = function(v){ return PAD.t + innerH - (v - min) / range * innerH }
+    const avg = vals.reduce(function(a,b){return a+b.v}, 0) / vals.length
+    const ticks = 3
+    const yTickVals = []
+    for (let i = 0; i < ticks; i++) yTickVals.push(min + (max - min) * i / (ticks - 1))
+
+    // 拆线段
+    let segs = [], cur = []
+    pts.forEach(function(p){
+      if (p) cur.push(x(p).toFixed(1) + ',' + y(p.v).toFixed(1))
+      else { if (cur.length > 1) segs.push(cur); cur = [] }
+    })
+    if (cur.length > 1) segs.push(cur)
+
+    const last = vals[vals.length - 1]
+    const dateLabels = (history || []).map(function(e){return e.date ? e.date.slice(5) : ''})
+    if (today && today.date) dateLabels.push(today.date.slice(5))
+    const labelStep = Math.max(1, Math.ceil(dateLabels.length / 5))
+
+    svg = (
+      <svg width={W} height={H} style={{display:'block'}}>
+        {/* 横向网格 + Y 轴标签 */}
+        {yTickVals.map(function(v, i){
+          const yy = y(v).toFixed(1)
+          return (
+            <g key={i}>
+              <line x1={PAD.l} y1={yy} x2={W - PAD.r} y2={yy}
+                    stroke={C.outline} strokeWidth={0.5} opacity={0.6}/>
+              <text x={PAD.l - 4} y={yy} fontSize={8} fill={C.third}
+                    textAnchor='end' dominantBaseline='middle' fontWeight={600}>
+                {Number(v).toFixed(meta.decimals)}
+              </text>
+            </g>
+          )
+        })}
+        {/* 平均基线 */}
+        <line x1={PAD.l} y1={y(avg).toFixed(1)} x2={W - PAD.r} y2={y(avg).toFixed(1)}
+              stroke={meta.color} strokeWidth={0.8} strokeDasharray='3 2' opacity={0.5}/>
+        {/* 数据线 */}
+        {segs.map(function(s, si){
+          return <polyline key={si} points={s.join(' ')} fill='none' stroke={meta.color}
+                   strokeWidth={2} strokeLinecap='round' strokeLinejoin='round'/>
+        })}
+        {/* 数据点 */}
+        {vals.map(function(p, i){
+          return <circle key={i} cx={x(p.i).toFixed(1)} cy={y(p.v).toFixed(1)} r={2.2}
+                         fill={meta.color}/>
+        })}
+        {/* 当前高亮 + 数值 */}
+        <circle cx={x(last.i).toFixed(1)} cy={y(last.v).toFixed(1)} r={4}
+                fill='white' stroke={meta.color} strokeWidth={2}/>
+        <rect x={Math.min(W - PAD.r - 64, x(last.i) - 32)} y={Math.max(PAD.t - 2, y(last.v) - 22)}
+              width={60} height={16} rx={4} fill={meta.color}/>
+        <text x={Math.min(W - PAD.r - 64, x(last.i) - 32) + 30}
+              y={Math.max(PAD.t - 2, y(last.v) - 22) + 11}
+              fontSize={10} fontWeight={700} fill='white' textAnchor='middle'>
+          {Number(last.v).toFixed(meta.decimals)} {meta.unit}
+        </text>
+        {/* X 轴日期 */}
+        {dateLabels.map(function(d, i){
+          if (i % labelStep !== 0 && i !== dateLabels.length - 1) return null
+          return <text key={i} x={x(i).toFixed(1)} y={H - 4} fontSize={8}
+                       fill={C.third} textAnchor='middle' fontWeight={500}>{d}</text>
+        })}
+      </svg>
+    )
+  }
+
+  async function close(e){
+    e && e.stopPropagation && e.stopPropagation()
+    try { await fetch('http://127.0.0.1:8910/api/focus/clear') } catch(_){}
+    if (refresh) refresh()
+  }
+
   return (
-    <div style={{position:'relative',background:C.cardBg,
+    <div onMouseDown={close}
+         style={{position:'absolute', top:30, left:0, right:0, bottom:0,
+                 background:'rgba(255,255,255,0.985)',
+                 borderRadius:22, padding:'6px 10px 4px',
+                 display:'flex', flexDirection:'column', gap:3,
+                 zIndex:10, boxShadow:'0 4px 12px rgba(0,0,0,0.10)'}}>
+      <div style={{display:'flex', alignItems:'center', paddingLeft:2}}>
+        <span style={{width:8, height:8, borderRadius:'50%', background:meta.color, flexShrink:0}}/>
+        <span style={{fontSize:11, fontWeight:700, color:C.label, marginLeft:6}}>{meta.label} · 近 7 日</span>
+        <div style={{flex:1}}/>
+        <div onMouseDown={close} title='关闭'
+             style={{width:18, height:18, borderRadius:'50%', background:C.outline,
+                     display:'flex', alignItems:'center', justifyContent:'center',
+                     cursor:'pointer', fontSize:12, fontWeight:700, color:C.second, lineHeight:1}}>×</div>
+      </div>
+      <div style={{display:'flex', justifyContent:'center', flex:1, alignItems:'center'}}>{svg}</div>
+    </div>
+  )
+}
+
+// ── Metric card: bold color side-bar + saturated translucent fill ────────────
+function Card({ accentColor, icon, iconBg, iconColor, value, unit, label, right, onClick }) {
+  return (
+    <div onMouseDown={onClick ? function(e){
+      e.preventDefault(); e.stopPropagation(); onClick(e)
+    } : undefined}
+         style={{position:'relative',background:C.cardBg,
                  borderRadius:14,overflow:'hidden',
                  display:'flex',alignItems:'center',gap:7,
-                 padding:'7px 9px 7px 8px',flex:1,minWidth:0}}>
+                 padding:'7px 9px 7px 8px',flex:1,minWidth:0,
+                 cursor:onClick ? 'pointer' : 'default'}}>
       {/* 左侧粗彩条 */}
       <div style={{position:'absolute',left:0,top:0,bottom:0,width:5,
                    background:accentColor,
@@ -255,10 +394,17 @@ export const render = function({ output, refresh }) {
   const spo2Series = hist.map(function(e){ return e.spo2 })
   if (spo2 != null) spo2Series.push(spo2)
 
+  // ── Click handlers: set focus then re-render ─────────────────────────────
+  const focus = data.focus || null
+  async function pickFocus(metric){
+    try { await fetch('http://127.0.0.1:8910/api/focus/' + metric) } catch(_){}
+    refresh()
+  }
+
   return (
-    <div style={{background:C.base,borderRadius:22,width:'100%',height:'100%',
-                 boxSizing:'border-box',padding:'9px 11px 9px',
-                 display:'flex',flexDirection:'column',gap:1,
+    <div style={{position:'relative', background:C.base, borderRadius:22, width:'100%', height:'100%',
+                 boxSizing:'border-box', padding:'9px 11px 9px',
+                 display:'flex', flexDirection:'column', gap:1,
                  boxShadow:'0 2px 8px rgba(0,0,0,0.08), 0 8px 24px rgba(0,0,0,0.06)'}}>
 
       {/* Header */}
@@ -319,15 +465,18 @@ export const render = function({ output, refresh }) {
           <div style={{display:'flex',gap:7}}>
             <Card accentColor={C.red}    icon='♥'  iconBg={C.tipAlert} iconColor={C.red}
                   value={resting} label="心率"  unit="bpm"
-                  right={<Spark data={rhrSeries} color={C.red}/>}/>
+                  right={<Spark data={rhrSeries} color={C.red}/>}
+                  onClick={function(){ pickFocus('heart') }}/>
             <Card accentColor={C.blue}   icon='H'  iconBg={C.blueBg}   iconColor={C.blue}
                   value={hrv}     label="HRV"   unit="ms"
-                  right={<Spark data={hrvSeries} color={C.blue}/>}/>
+                  right={<Spark data={hrvSeries} color={C.blue}/>}
+                  onClick={function(){ pickFocus('hrv') }}/>
           </div>
           <div style={{display:'flex',gap:7}}>
             <Card accentColor={C.cyan}   icon='O₂' iconBg={C.cyanBg}   iconColor={C.cyan}
                   value={spo2}    label="血氧"  unit="%"
-                  right={<Spark data={spo2Series} color={C.cyan}/>}/>
+                  right={<Spark data={spo2Series} color={C.cyan}/>}
+                  onClick={function(){ pickFocus('spo2') }}/>
             <Card accentColor={C.purple} icon='R'  iconBg={C.purpleBg} iconColor={C.purple}
                   value={resp}    label="呼吸"  unit="/min"/>
           </div>
@@ -340,6 +489,11 @@ export const render = function({ output, refresh }) {
 
       {/* Tip */}
       {tip && <Tip tip={tip} level={level} style={{marginTop:4}}/>}
+
+      {/* Detail overlay (when a heart metric card is clicked) */}
+      {focus && ['heart','hrv','spo2'].indexOf(focus) >= 0 && (
+        <DetailOverlay focus={focus} history={hist} today={t} refresh={refresh}/>
+      )}
     </div>
   )
 }

@@ -71,8 +71,12 @@ const server = http.createServer(async (req, res) => {
 
   if (req.url === '/api/data') {
     const fresh = loadData();
+    const out = Object.assign({}, fresh || initData);
+    let focus = null;
+    try { focus = fs.readFileSync(path.join(__dirname, '.focus'), 'utf8').trim() || null; } catch (e) {}
+    out.focus = focus;
     res.writeHead(200, { 'Content-Type': 'application/json', 'Cache-Control': 'no-cache, no-store, must-revalidate' });
-    res.end(JSON.stringify(fresh || initData));
+    res.end(JSON.stringify(out));
     return;
   }
 
@@ -82,8 +86,25 @@ const server = http.createServer(async (req, res) => {
     const fresh = loadData() || initData;
     const resp = Object.assign({}, fresh);
     resp._fetch = { ok: !!ok, ts: new Date().toISOString() };
+    let focus = null;
+    try { focus = fs.readFileSync(path.join(__dirname, '.focus'), 'utf8').trim() || null; } catch (e) {}
+    resp.focus = focus;
     res.writeHead(200, { 'Content-Type': 'application/json', 'Cache-Control': 'no-cache, no-store, must-revalidate' });
     res.end(JSON.stringify(resp));
+    return;
+  }
+
+  if (req.url.startsWith('/api/focus/')) {
+    const m = decodeURIComponent(req.url.slice('/api/focus/'.length).split('?')[0]);
+    const focusFile = path.join(__dirname, '.focus');
+    let value = null;
+    if (m && m !== 'clear') {
+      try { fs.writeFileSync(focusFile, m); value = m; } catch (e) { value = null; }
+    } else {
+      try { fs.unlinkSync(focusFile); } catch (e) {}
+    }
+    res.writeHead(200, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify({ ok: true, focus: value }));
     return;
   }
 
