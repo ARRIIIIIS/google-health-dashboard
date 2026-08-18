@@ -7,88 +7,52 @@ API 文档：https://developers.google.com/health/android/reference/rest/v4
 import json, subprocess, sys, re, time, urllib.parse, random, os, shutil
 from datetime import datetime, timedelta
 
-# ─── 配置加载（参数化，便于开源分发）─────────────────────────────────────────
-# 配置文件位置可用环境变量覆盖：
-#   GHD_CONFIG  指向 config.json
-#   GHD_TOKENS  指向 tokens.json（含 access_token / refresh_token）
-#   GHD_DATA    指向 data.js
-BASE_DIR    = os.path.dirname(os.path.abspath(__file__))
-CONFIG_FILE = os.environ.get("GHD_CONFIG", os.path.join(BASE_DIR, "config.json"))
-TOKEN_FILE  = os.environ.get("GHD_TOKENS",  os.path.join(BASE_DIR, "tokens.json"))
-DATA_FILE   = os.environ.get("GHD_DATA",    os.path.join(BASE_DIR, "data.js"))
-
-# 运行期全局变量，由 load_config() 初始化
-PROXY = None
-CLIENT_ID = ""
-CLIENT_SECRET = ""
-REDIRECT_URI = "http://127.0.0.1:8911/oauth/callback"
-G_CONFIG = {}
-
-def load_config():
-    """读取 config.json，初始化全局配置。缺失时返回空配置（引导界面会写入）。"""
-    global PROXY, CLIENT_ID, CLIENT_SECRET, REDIRECT_URI, G_CONFIG
+def _detect_proxy():
+    """本地代理(7890)活着就走代理，否则直连。避免代理软件没开时全挂。"""
+    import socket
     try:
-        G_CONFIG = json.load(open(CONFIG_FILE, encoding="utf-8"))
+        socket.create_connection(("127.0.0.1", 7890), timeout=1).close()
+        return ["--proxy", "http://127.0.0.1:7890"]
     except Exception:
-        G_CONFIG = {}
-    g = G_CONFIG.get("google", {})
-    CLIENT_ID     = g.get("client_id", "")
-    CLIENT_SECRET = g.get("client_secret", "")
-    REDIRECT_URI  = g.get("redirect_uri", "http://127.0.0.1:8911/oauth/callback")
-    PROXY         = G_CONFIG.get("proxy") or None
-    return G_CONFIG
+        return []
 
-load_config()
+PROXY_ARGS = _detect_proxy()
+TOKEN_FILE = "/Users/dfrobot/.google-health-mcp/tokens.json"
+CONFIG_FILE = "/Users/dfrobot/.google-health-mcp/config.json"
+DATA_FILE = "/Users/dfrobot/google-health-dashboard/data.js"
 
 # ─── Token 管理 ────────────────────────────────────────────────────────────────
 
 def load_token():
-    try:
-        td = json.load(open(TOKEN_FILE, encoding="utf-8"))
-    except Exception:
-        # 尝试从 config.json 的 google.refresh_token 初始化
-        rt = G_CONFIG.get("google", {}).get("refresh_token", "")
-        if rt:
-            td = {"refresh_token": rt}
-            with open(TOKEN_FILE, "w") as f:
-                json.dump(td, f, indent=2, ensure_ascii=False)
-        else:
-            return None
+    td = json.load(open(TOKEN_FILE))
     if td.get("expires_at", 0) - int(time.time()) < 60:
         log("token 快过期，刷新中...")
         new_tok = refresh_access_token()
         if not new_tok:
             log("⚠️  token 刷新失败，沿用旧 token")
         else:
-            td = json.load(open(TOKEN_FILE, encoding="utf-8"))
-    return td.get("access_token")
+            td = json.load(open(TOKEN_FILE))
+    return td["access_token"]
 
 def refresh_access_token():
     """用 refresh_token 换新 access_token，写回 tokens.json。返回新 token 或 None。"""
-    if not CLIENT_ID or not CLIENT_SECRET:
-        log("❌ 缺少 Google OAuth client_id/secret，请先完成引导设置")
-        return None
-    # 取 refresh_token：优先 tokens.json，回退 config.json
     try:
-        td = json.load(open(TOKEN_FILE, encoding="utf-8"))
-    except Exception:
-        td = {}
-    rt = td.get("refresh_token") or G_CONFIG.get("google", {}).get("refresh_token", "")
-    if not rt:
-        log("❌ 缺少 refresh_token，请先完成 Google 授权")
+        cfg   = json.load(open(CONFIG_FILE))
+        td    = json.load(open(TOKEN_FILE))
+    except Exception as e:
+        log(f"❌ 读取 OAuth 配置失败: {e}")
         return None
     body = urllib.parse.urlencode({
-        "client_id":     CLIENT_ID,
-        "client_secret": CLIENT_SECRET,
-        "refresh_token": rt,
+        "client_id":     cfg["GOOGLE_HEALTH_CLIENT_ID"],
+        "client_secret": cfg["GOOGLE_HEALTH_CLIENT_SECRET"],
+        "refresh_token": td.get("refresh_token", ""),
         "grant_type":    "refresh_token",
     })
-    cmd = ["curl", "-s", "--max-time", "30", "-X", "POST",
-           "https://oauth2.googleapis.com/token", "-d", body]
-    if PROXY:
-        cmd = ["curl", "-s", "--proxy", PROXY, "--max-time", "30", "-X", "POST",
-               "https://oauth2.googleapis.com/token", "-d", body]
-    r = subprocess.run(cmd, capture_output=True, text=True)
+    r = subprocess.run(
+        ["curl", "-s", *PROXY_ARGS, "--max-time", "30", "-X", "POST",
+         "https://oauth2.googleapis.com/token", "-d", body],
+        capture_output=True, text=True
+    )
     try:
         tok = json.loads(r.stdout)
         if "access_token" not in tok:
@@ -126,21 +90,17 @@ def _curl_json(cmd):
             time.sleep(2)
     return {}
 
-def curl_base():
-    cmd = ["curl", "-s", "--max-time", "30"]
-    if PROXY:
-        cmd.extend(["--proxy", PROXY])
-    return cmd
-
 def api_get(path):
-    return _curl_json(curl_base() + [
+    return _curl_json([
+        "curl", "-s", *PROXY_ARGS, "--max-time", "30",
         "-H", f"Authorization: Bearer {TOKEN}",
         f"https://health.googleapis.com/v4/{path}"
     ])
 
 def api_post(dtype, body):
     """POST to dailyRollUp 接口（v4，无 dataTypeName）"""
-    return _curl_json(curl_base() + [
+    return _curl_json([
+        "curl", "-s", *PROXY_ARGS, "--max-time", "30",
         "-H", f"Authorization: Bearer {TOKEN}",
         "-H", "Content-Type: application/json",
         "-X", "POST",

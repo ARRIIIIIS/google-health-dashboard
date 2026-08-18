@@ -123,8 +123,18 @@ const server = http.createServer(async (req, res) => {
   }
 });
 
+// Check if OAuth config exists — if not, skip auto-fetch (qclaw agent handles collection)
+const hasConfig = fs.existsSync(path.join(__dirname, 'config.json'));
+
 server.listen(PORT, () => {
   log('✓ Health data server on http://127.0.0.1:' + PORT);
+  log('  data file: ' + dataFile);
+
+  if (!hasConfig) {
+    log('  ⚠️  无 config.json，跳过自动采集（由 qclaw agent 负责数据采集）');
+    return;
+  }
+
   const FETCH_NORMAL = 10 * 60 * 1000;  // 常规间隔：10 分钟
   const FETCH_FOLLOW = 5 * 60 * 1000;   // 久坐复查间隔：5 分钟
 
