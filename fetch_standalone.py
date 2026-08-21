@@ -7,6 +7,12 @@ API 文档：https://developers.google.com/health/android/reference/rest/v4
 import json, subprocess, sys, re, time, urllib.parse, random, os, shutil
 from datetime import datetime, timedelta
 
+# 提示文本中剥离 emoji / 装饰符号（小组件系统字体无法渲染，会显示成 □）
+_EMOJI_RE = re.compile(r'[\U0001F000-\U0001FFFF\u2600-\u27BF\uFE0F\u200D]')
+def clean_text(s):
+    if not s: return s
+    return _EMOJI_RE.sub('', s).strip()
+
 def _detect_proxy():
     """本地代理(7890)活着就走代理，否则直连。避免代理软件没开时全挂。"""
     import socket
@@ -33,6 +39,14 @@ def load_token():
         else:
             td = json.load(open(TOKEN_FILE))
     return td["access_token"]
+
+def is_token_expired():
+    """检查 token 是否已过期（含 60s 缓冲）。"""
+    try:
+        td = json.load(open(TOKEN_FILE))
+        return td.get("expires_at", 0) - int(time.time()) < 60
+    except Exception:
+        return True
 
 def refresh_access_token():
     """用 refresh_token 换新 access_token，写回 tokens.json。返回新 token 或 None。"""
@@ -231,6 +245,76 @@ def fetch_daily_metric(dtype, today):
 def fetch_resting_hr(today):
     v = fetch_daily_metric("daily-resting-heart-rate", today)
     return v
+
+def fetch_latest_hr():
+    """
+    取最新实时心率样本（Fitbit Air / Health Connect 每 3 秒上报）。
+    返回 (bpm, "HH:MM") 或 (None, None)。
+    """
+    try:
+        d = api_get("users/me/dataTypes/heart-rate/dataPoints?pageSize=1")
+        pts = d.get("dataPoints", [])
+        if not pts:
+            return None, None
+        hr = pts[0].get("heartRate", {})
+        bpm = float(hr.get("beatsPerMinute", 0)) or None
+        tt  = hr.get("sampleTime", {}).get("civilTime", {}).get("time", {})
+        if bpm and tt.get("hours") is not None:
+            hh, mm = tt.get("hours", 0), tt.get("minutes", 0)
+            return int(round(bpm)), f"{hh:02d}:{mm:02d}"
+        return None, None
+    except Exception:
+        return None, None
+
+
+def fetch_hourly_steps(steps_today, steps_yest):
+    """
+    （已停用：折线图被用户否决后不再调用，函数保留以备将来复用）
+    拉取今日/昨日每小时步数原始点，按本地小时聚合，
+    再缩放使累计曲线终点对齐日总量（解决 raw 累加与 reconcile 的差异）。
+    返回 (今日累计[24], 昨日累计[24])，失败返回 (None, None)。
+    """
+    try:
+        pts = []
+        url = "users/me/dataTypes/steps/dataPoints?pageSize=500"
+        for _ in range(12):   # 上限 12 页，足够覆盖今/昨两天
+            d = api_get(url)
+            pts += d.get("dataPoints", [])
+            tok = d.get("nextPageToken")
+            if not tok:
+                break
+            url = f"users/me/dataTypes/steps/dataPoints?pageSize=500&pageToken={tok}"
+
+        def local_hour(p):
+            iv = p["steps"]["interval"]
+            st = iv["startTime"]                       # 2026-08-21T09:02:00Z
+            off = int(iv.get("startUtcOffset", "0s").rstrip("s") or 0) / 3600.0
+            hh = int(st[11:13])
+            return st[:10], int(hh + off) % 24
+
+        today_s = datetime.now().strftime("%Y-%m-%d")
+        yest_s  = (datetime.now() - timedelta(days=1)).strftime("%Y-%m-%d")
+        td, yd = [0] * 24, [0] * 24
+        for p in pts:
+            d0, h = local_hour(p)
+            c = int(p["steps"]["count"])
+            if d0 == today_s:   td[h] += c
+            elif d0 == yest_s:  yd[h] += c
+
+        def cumulative(arr, tot):
+            s = sum(arr)
+            if s == 0:
+                return [0] * 24
+            f = (tot or 0) / s
+            out, run = [], 0
+            for v in arr:
+                run += v * f
+                out.append(round(run))
+            return out
+
+        return cumulative(td, steps_today), cumulative(yd, steps_yest)
+    except Exception:
+        return None, None
 
 def fetch_respiratory_rate(today):
     v = fetch_daily_metric("daily-respiratory-rate", today)
@@ -560,7 +644,7 @@ def generate_insight(steps, sleep_total, deep, rem, resting_hr, hrv, spo2, resp,
     return None, "good"
 
 
-def generate_tip(steps, azm, sleep_total, deep, rem, resting_hr, hrv, spo2, resp, yesterday, update_seq, sedentary=False):
+def generate_tip(steps, azm, sleep_total, deep, rem, resting_hr, hrv, spo2, resp, yesterday, update_seq, sedentary=False, idle_min=0):
     """
     生成小组件提示文本。
     核心：generate_insight() 给出自然语言洞察，阈值告警兜底。
@@ -593,11 +677,18 @@ def generate_tip(steps, azm, sleep_total, deep, rem, resting_hr, hrv, spo2, resp
         warnings.append(("alert", "静息心率持续偏高，建议就医"))
     if hrv and hrv < 20:
         warnings.append(("warn", "HRV 明显偏低，可能过度疲劳"))
-    if sedentary:
-        warnings.append(("warn", "已久坐一段时间，建议起身活动 🚶"))
 
     if warnings:
-        warnings.sort(key=lambda w: 0 if w[0] == "alert" else 1)
+        # alert 级红线最优先；warn 级让位给久坐提示（久坐更紧急、可立即行动）
+        alerts = [w for w in warnings if w[0] == "alert"]
+        if alerts:
+            return f"{greet} {alerts[0][1]}", "alert"
+
+    # 久坐提醒优先于 warn 级警告与普通洞察（时间敏感、需要立刻行动）
+    if sedentary:
+        return f"{greet} 已久坐 {idle_min} 分钟，起来活动 3 分钟就能重置", "warn"
+
+    if warnings:
         level, wtxt = warnings[0]
         return f"{greet} {wtxt}", level
 
@@ -613,6 +704,12 @@ def log(msg):
 def main():
     global TOKEN
     TOKEN = load_token()
+
+    # 如果 token 仍然过期（刷新失败），不要调 API 覆盖好数据
+    if is_token_expired():
+        log("❌ Token 已过期且刷新失败，跳过本次采集，保留旧数据")
+        print("DASHBOARD_SKIP")
+        return
 
     today = datetime.now().strftime("%Y-%m-%d")
     log(f"开始采集 {today}...")
@@ -636,7 +733,9 @@ def main():
     resp        = fetch_respiratory_rate(today)
     spo2        = fetch_oxygen_saturation(today)
     hrv         = fetch_hrv(today)
-    log(f"  静息HR: {resting_hr} | 呼吸: {resp} | SpO2: {spo2} | HRV: {hrv}")
+    # 实时心率（最新样本，3 秒粒度）
+    heart_rate, heart_rate_time = fetch_latest_hr()
+    log(f"  静息HR: {resting_hr} | 实时HR: {heart_rate}@{heart_rate_time} | 呼吸: {resp} | SpO2: {spo2} | HRV: {hrv}")
 
     # ── 历史记录（用于变化对比）──
     history = load_history()
@@ -653,14 +752,10 @@ def main():
     if yesterday:
         log(f"  昨日对比: steps={yesterday.get('steps')} sleep={yesterday.get('sleep_asleep_min')} hrv={yesterday.get('hrv')}")
 
-    # ── 久坐检测 ──
-    now = datetime.now()
-    sedentary, idle_min, reminded = check_sedentary(today_entry, steps, now)
-    if sedentary:
-        log(f"  ⏱️ 久坐检测: idle≈{idle_min}min, reminded={reminded}, follow_up={today_entry.get('follow_up')}")
-    if reminded:
-        today_entry["pending_notify"] = True
-        send_notification(steps, idle_min)   # 写盘后弹交互窗
+    # ── 久坐检测：写 idle_min/sedentary 到 data.js，由 widget 渲染胶囊+弹窗。
+    # 注意：已彻底禁用 macOS 系统通知横幅（不再调用 send_notification）。
+    sedentary, idle_min, reminded = check_sedentary(today_entry, steps, datetime.now())
+    log(f"  久坐: {'是' if sedentary else '否'} (idle={idle_min}min)")
 
     # 生成提示
     tip, tip_level = generate_tip(
@@ -669,9 +764,9 @@ def main():
         sleep["deep"]  if sleep else 0,
         sleep["rem"]   if sleep else 0,
         resting_hr, hrv, spo2, resp,
-        yesterday, update_seq, sedentary
+        yesterday, update_seq, sedentary, idle_min
     )
-    log(f"  tip: {tip} [{tip_level}] (seq={update_seq}, sedentary={sedentary})")
+    log(f"  tip: {tip} [{tip_level}] (seq={update_seq})")
 
     # 写入 data.js
     # 写入 data.js（data-server.js 期望格式：const HEALTH_DATA = { today: {...} }）
@@ -687,6 +782,8 @@ def main():
         # Widget 期望的字段名（兼容）
         "active_minutes": azm[0] + azm[1] + azm[2],   # 总活动分钟
         "resting_hr": resting_hr,
+        "heart_rate":      heart_rate,        # 实时心率（最新样本 bpm）
+        "heart_rate_time": heart_rate_time,   # 采样时间 "HH:MM"
         "hrv":       hrv,
         "spo2":      spo2,
         "respiratory_rate": resp,
@@ -698,9 +795,10 @@ def main():
         "sleep_rem_min":    sleep["rem"]      if sleep else 0,
         "sleep_bedtime":    sleep["bedtime"]  if sleep else "",
         "sleep_wakeup":     sleep["wakeup"]   if sleep else "",
-        "tip":      tip,
+        "tip":      clean_text(tip),
         "tip_level": tip_level,
         "sedentary": sedentary,
+        "idle_min": idle_min,
         "follow_up": today_entry.get("follow_up", False),
         "snooze_until": today_entry.get("snooze_until", 0),
         "pending_notify": today_entry.get("pending_notify", False),

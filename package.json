@@ -1,6 +1,6 @@
 {
   "name": "google-health-dashboard",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "description": "本地健康仪表盘 — 从 Google Health API 获取步数、睡眠、心率、HRV、血氧等数据，所有信息保存在你自己的电脑上。",
   "main": "standalone-server.js",
   "scripts": {
