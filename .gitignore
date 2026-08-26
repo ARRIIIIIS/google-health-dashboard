@@ -1,20 +1,7 @@
-# 个人凭据与数据（绝不入库）
-config.json
-tokens.json
-data.js
-.focus
-
-# 运行时日志
-*.log
-
-# Python
-__pycache__/
-*.pyc
-
-# Node
 node_modules/
-package-lock.json
-npm-debug.log*
-
-# 系统文件
+dist/
+src-tauri/target/
+src-tauri/gen/
+release/
 .DS_Store
+*.log

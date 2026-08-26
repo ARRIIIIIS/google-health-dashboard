@@ -1,0 +1,46 @@
+/* 全局：桌面小组件窗口为固定 344×272，禁止 body 滚动/边距，避免内容溢出出现滚动条 */
+html,
+body {
+  margin: 0;
+  padding: 0;
+  height: 100%;
+  overflow: hidden;
+  font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "PingFang SC", "Helvetica Neue", "Microsoft YaHei", sans-serif;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+/* 久坐提醒动画（原 Übersicht className 注入的 @keyframes，改为标准 CSS） */
+@keyframes sed-pulse {
+  0%,
+  100% {
+    background: rgba(255, 159, 10, 0.16);
+  }
+  50% {
+    background: rgba(255, 159, 10, 0.3);
+  }
+}
+
+@keyframes sed-pop {
+  from {
+    opacity: 0;
+    transform: translateY(-8px) scale(0.92);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+/* 刷新按钮旋转反馈（onRefresh 时 body 挂 hd-refreshing，点完 3s 后移除）*/
+@keyframes hd-spin {
+  from {
+    transform: rotate(0deg);
+  }
+  to {
+    transform: rotate(360deg);
+  }
+}
+body.hd-refreshing .hd-refresh-btn svg {
+  animation: hd-spin 0.9s linear infinite;
+}

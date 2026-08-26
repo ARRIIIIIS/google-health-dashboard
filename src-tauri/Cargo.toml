@@ -1,0 +1,27 @@
+[package]
+name = "health-dashboard-tauri"
+version = "1.0.0"
+description = "跨平台健康仪表盘小组件 (Tauri + Google Health)"
+edition = "2021"
+rust-version = "1.77"
+
+# objc 0.2 老 crate 内部使用 #[cfg(feature = "cargo-clippy")]，需声明该 feature 避免 unexpected_cfgs 警告
+[features]
+cargo-clippy = []
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+tauri = { version = "2", features = ["macos-private-api", "image-png", "tray-icon"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+chrono = "0.4"
+libc = "0.2"
+
+# macOS 桌面层级窗口（贴桌面、不挡普通窗口）需要直接调 NSWindow
+[target.'cfg(target_os = "macos")'.dependencies]
+objc = "0.2"
+
+[profile.release]
+opt-level = 2

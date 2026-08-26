@@ -1,44 +1,22 @@
 {
-  "name": "google-health-dashboard",
-  "version": "1.1.0",
-  "description": "本地健康仪表盘 — 从 Google Health API 获取步数、睡眠、心率、HRV、血氧等数据，所有信息保存在你自己的电脑上。",
-  "main": "standalone-server.js",
+  "name": "health-dashboard-tauri",
+  "private": true,
+  "version": "1.0.0",
+  "type": "module",
   "scripts": {
-    "start": "./start.sh",
-    "ui": "node standalone-server.js",
-    "data": "node data-server.js",
-    "fetch": "python3 fetch_standalone.py"
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview",
+    "tauri": "tauri"
   },
-  "keywords": [
-    "google-health",
-    "google-fit",
-    "fitbit",
-    "health-dashboard",
-    "ubersicht",
-    "local-first",
-    "privacy",
-    "step-counter",
-    "sleep-tracking",
-    "heart-rate",
-    "hrv",
-    "spo2"
-  ],
-  "author": "ARRIIIIIS",
-  "license": "MIT",
-  "homepage": "https://github.com/ARRIIIIIS/google-health-dashboard",
-  "repository": {
-    "type": "git",
-    "url": "git+https://github.com/ARRIIIIIS/google-health-dashboard.git"
+  "dependencies": {
+    "@tauri-apps/api": "^2.0.0",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1"
   },
-  "bugs": {
-    "url": "https://github.com/ARRIIIIIS/google-health-dashboard/issues"
-  },
-  "engines": {
-    "node": ">=14"
-  },
-  "os": [
-    "darwin"
-  ],
-  "dependencies": {},
-  "private": false
+  "devDependencies": {
+    "@tauri-apps/cli": "^2.0.0",
+    "@vitejs/plugin-react": "^4.3.1",
+    "vite": "^5.4.0"
+  }
 }

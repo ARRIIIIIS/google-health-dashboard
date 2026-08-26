@@ -1,0 +1,28 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024" width="1024" height="1024">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#232327"/>
+      <stop offset="1" stop-color="#0A0A0C"/>
+    </linearGradient>
+  </defs>
+  <rect x="0" y="0" width="1024" height="1024" rx="224" ry="224" fill="url(#bg)"/>
+  <!--
+    三圈活动环：底层暗色轨道 + 上层彩色进度弧
+    stroke-dasharray = "<arc> <gap>" 双值切出真实间隙，让两端 cap (round) 形成柔和圆头
+    外圈 r=320 (周长 2010.6) → 弧 1830 / 间隙 180.6，起始 12 点钟方向
+    中圈 r=224 (周长 1407.4) → 弧 1280 / 间隙 127.4
+    内圈 r=128 (周长  804.2) → 弧  720 / 间隙  84.2
+    rotate(-90) 把起点拨到 12 点钟；stroke-dashoffset 微调对齐缺口位置
+  -->
+  <g transform="translate(512,512) rotate(-90)" fill="none" stroke-linecap="round">
+    <!-- 外圈：暗色底环 + 红色进度弧（带 gap） -->
+    <circle r="320" stroke="#3A1A1F" stroke-width="62" stroke-dasharray="2010.6 2010.6" stroke-dashoffset="0"/>
+    <circle r="320" stroke="#FF375F" stroke-width="62" stroke-dasharray="1830 180.6" stroke-dashoffset="90"/>
+    <!-- 中圈：暗色底环 + 绿色进度弧 -->
+    <circle r="224" stroke="#152B20" stroke-width="62" stroke-dasharray="1407.4 1407.4" stroke-dashoffset="0"/>
+    <circle r="224" stroke="#30D158" stroke-width="62" stroke-dasharray="1280 127.4" stroke-dashoffset="63"/>
+    <!-- 内圈：暗色底环 + 蓝色进度弧 -->
+    <circle r="128" stroke="#10212E" stroke-width="62" stroke-dasharray="804.2 804.2" stroke-dashoffset="0"/>
+    <circle r="128" stroke="#0A84FF" stroke-width="62" stroke-dasharray="720 84.2" stroke-dashoffset="42"/>
+  </g>
+</svg>
