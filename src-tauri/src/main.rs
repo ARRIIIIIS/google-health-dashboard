@@ -695,29 +695,51 @@ fn refresh_data(app: &AppHandle) {
 
 #[tauri::command]
 fn reset_sedentary(app: AppHandle) -> Result<(), String> {
-    // 用户点"站起来了"：不再立刻清零久坐状态，改为记录 ack 时间（3分钟宽限期）。
-    // 下次 Python check_sedentary 会对比步数：步数增加 → 自动重置；步数不变 → 宽限期后继续提醒。
+    // 用户点"站起来了"：立刻重置久坐数值（即时反馈），同时记录 ack 时间+基线步数。
+    // 下次 Python check_sedentary 对比步数：步数增加 → 保持重置；步数不变 → 回滚并继续累计。
     let (_, data, _, _) = paths(&app);
     let content = std::fs::read_to_string(&data).map_err(|e| e.to_string())?;
     let mut v: serde_json::Value = serde_json::from_str(&content).map_err(|e| e.to_string())?;
 
+    let now = chrono::Local::now().format("%Y-%m-%d %H:%M:%S").to_string();
     let now_ms = chrono::Utc::now().timestamp_millis();
     let today = v["today"]["date"].as_str().unwrap_or("").to_string();
+    let steps = v["today"]["steps"].clone();
 
     if let Some(hist) = v.get_mut("history").and_then(|h| h.as_array_mut()) {
         for h in hist.iter_mut() {
             if h.get("date").and_then(|d| d.as_str()) == Some(today.as_str()) {
+                // 记录 ack 时刻的步数基线（供 Python 对比是否真的走了）
                 h["user_acked_time"] = serde_json::Value::Number(now_ms.into());
+                h["steps_at_ack"] = steps.clone();
+                // 保存原始 last_move_time 供回滚用
+                if h.get("last_move_time_before_ack").is_none() {
+                    h["last_move_time_before_ack"] = h["last_move_time"].clone();
+                }
+                // 立刻重置（即时视觉反馈）
+                h["last_move_time"] = serde_json::Value::String(now.clone());
+                h["last_steps"] = steps.clone();
+                h["sedentary_notified"] = serde_json::Value::Bool(false);
+                h["follow_up"] = serde_json::Value::Bool(false);
                 h["last_remind_time"] = serde_json::Value::Number(now_ms.into());
-                h["sedentary_notified"] = serde_json::Value::Bool(true);
             }
         }
     }
 
     if let Some(t) = v.get_mut("today") {
         t["user_acked_time"] = serde_json::Value::Number(now_ms.into());
+        t["steps_at_ack"] = steps.clone();
+        // 保存原始值供回滚
+        if t.get("last_move_time_before_ack").is_none() {
+            t["last_move_time_before_ack"] = t["last_move_time"].clone();
+        }
+        // 立刻重置久坐数值
+        t["last_move_time"] = serde_json::Value::String(now.clone());
+        t["last_steps"] = steps.clone();
+        t["sedentary"] = serde_json::Value::Bool(false);
+        t["idle_min"] = serde_json::Value::Number(0.into());
+        t["follow_up"] = serde_json::Value::Bool(false);
         t["last_remind_time"] = serde_json::Value::Number(now_ms.into());
-        // 保持 sedentary/follow_up/idle_min 不变，等 Python 侧步数驱动决定
     }
 
     std::fs::write(&data, serde_json::to_string_pretty(&v).unwrap()).map_err(|e| e.to_string())
