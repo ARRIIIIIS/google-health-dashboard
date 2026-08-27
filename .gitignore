@@ -6,3 +6,5 @@ release/
 .DS_Store
 *.log
 vite.config.js.timestamp-*.mjs
+__pycache__/
+*.pyc
