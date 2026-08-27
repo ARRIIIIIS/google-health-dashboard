@@ -32,8 +32,8 @@ const C_DARK = {
   label: "rgba(255,255,255,0.95)",
   second: "rgba(250,250,252,0.86)",
   third: "rgba(245,245,250,0.66)",
-  // 用更浓的半透明底色压住系统玻璃的材质偏色，保持 Apple 暗色系统色 #1C1C1E 为主调
-  bg: "linear-gradient(160deg, rgba(44,44,46,0.82) 0%, rgba(28,28,30,0.78) 100%)",
+  // 半透明底色让系统 NSVisualEffectView 的模糊背景透出来（太浓会盖成纯黑，太透会偏色）
+  bg: "linear-gradient(160deg, rgba(52,52,56,0.58) 0%, rgba(30,30,34,0.52) 100%)",
   card: "rgba(255,255,255,0.07)",
   hairline: "rgba(255,255,255,0.08)",
   green: "#30D158",
@@ -253,6 +253,30 @@ function SettingsPanel({ draft, setDraft, onSave, onCancel, busy, rerender, syst
         </div>
       </div>
 
+      {/* ── 久坐提醒（自定义阈值 / 提醒间隔）── */}
+      <label style={labelStyle}>{T("sedThreshold")}</label>
+      <div style={{ display: "flex", gap: 5, flexWrap: "wrap" }}>
+        {[30, 45, 60, 90].map((m) => (
+          <div key={m} onClick={() => set("sedentary_min", m)}
+            style={{ fontSize: 10, fontWeight: 600, padding: "4px 9px", borderRadius: 8, cursor: "pointer",
+              background: (draft.sedentary_min || 45) === m ? C.amber : "rgba(128,128,128,0.14)",
+              color: (draft.sedentary_min || 45) === m ? "#fff" : C.second }}>
+            {m} {T("minUnit")}
+          </div>
+        ))}
+      </div>
+      <label style={labelStyle}>{T("sedRemind")}</label>
+      <div style={{ display: "flex", gap: 5, flexWrap: "wrap" }}>
+        {[15, 30, 60].map((m) => (
+          <div key={m} onClick={() => set("sedentary_remind_min", m)}
+            style={{ fontSize: 10, fontWeight: 600, padding: "4px 9px", borderRadius: 8, cursor: "pointer",
+              background: (draft.sedentary_remind_min || 30) === m ? C.amber : "rgba(128,128,128,0.14)",
+              color: (draft.sedentary_remind_min || 30) === m ? "#fff" : C.second }}>
+            {m} {T("minUnit")}
+          </div>
+        ))}
+      </div>
+
       <div style={{ height: 1, background: C.hairline, margin: "10px 0 4px" }} />
 
       {/* ── Google 健康（浏览器引导）── */}
@@ -420,8 +444,8 @@ function Widget({ data, settings, onRefresh, onReset, justResetAt, sedPopRef, dn
     flexDirection: "column",
     // 玻璃模糊由系统 NSVisualEffectView 提供；这里只叠半透明底色（C.bg 本身是渐变），透出系统玻璃
     background: C.bg,
-    // 极淡描边区分玻璃与桌面
-    border: "1px solid rgba(255,255,255,0.14)",
+    // 克制的高光：顶部一道极淡内描边模拟玻璃棱边，不做厚重反光
+    boxShadow: "inset 0 1px 0 rgba(255,255,255,0.13), inset 0 -0.5px 0 rgba(0,0,0,0.08)",
     overflow: "hidden",
     position: "relative",
   };

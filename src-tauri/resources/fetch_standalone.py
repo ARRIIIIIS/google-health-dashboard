@@ -31,6 +31,8 @@ _ARGV.add_argument("--token",  default=os.path.expanduser("~/.google-health-mcp/
 _ARGV.add_argument("--config", default=os.path.expanduser("~/.google-health-mcp/config.json"))
 _ARGV.add_argument("--once",   action="store_true")
 _ARGV.add_argument("--loop",   action="store_true")
+_ARGV.add_argument("--sed-min",    type=int, default=45, help="连续不动超过此时长(分钟)判定久坐")
+_ARGV.add_argument("--remind-min", type=int, default=30, help="久坐后每隔多久复查提醒一次(分钟)")
 _ARGS = _ARGV.parse_known_args()[0]
 TOKEN_FILE  = _ARGS.token
 CONFIG_FILE = _ARGS.config
@@ -367,7 +369,8 @@ def load_current_today():
     return load_data_file().get("today", {})
 
 # ─── 久坐检测参数 ──────────────────────────────────────────────────────────────
-SEDENTARY_MIN = 45        # 连续不动超过此时长(分钟)则提醒
+SEDENTARY_MIN = 45        # 连续不动超过此时长(分钟)则提醒（可被 --sed-min 覆盖）
+SEDENTARY_REMIND_MIN = 30 # 首次提醒后，每隔此时长复查提醒一次(分钟)（可被 --remind-min 覆盖）
 VERIFY_AFTER_MS = 3 * 60 * 1000  # 用户点击后 3 分钟核验步数
 STEP_DELTA    = 80        # 步数增加超过此值算"有活动"，重置基线
 NOTIFY_START_HOUR = 10     # 仅在工作时段发通知(这台 Mac 10:00–19:00 使用)
@@ -458,6 +461,7 @@ def apply_choice(choice):
                 h["snooze_until"] = 0
                 h["pending_notify"] = False
                 h["sedentary_notified"] = True
+                h["last_remind_time"] = int(time.time() * 1000)
                 break
 
         d["today"]["verify_after_time"] = verify_time
@@ -466,6 +470,7 @@ def apply_choice(choice):
         d["today"]["snooze_until"] = 0
         d["today"]["pending_notify"] = False
         d["today"]["sedentary_notified"] = True
+        d["today"]["last_remind_time"] = int(time.time() * 1000)
         d["today"]["sedentary"] = True
         write_data(d)
         log(f"  💬 用户点击「{choice}」，{VERIFY_AFTER_MS//60000}分钟后核验步数（基准={steps_now}）")
@@ -548,9 +553,13 @@ def check_sedentary(today_entry, steps, now):
     # 触发提醒（本周期首次 或 follow_up 复查，且弹窗未挂起）
     in_window = NOTIFY_START_HOUR <= now.hour < NOTIFY_END_HOUR
     reminded = False
-    if in_window and (not today_entry.get("sedentary_notified") or follow_up) and not today_entry.get("pending_notify"):
+    # 复查间隔：距上次提醒不足 SEDENTARY_REMIND_MIN 分钟不重复弹，防止 follow_up 每 5 分钟刷屏
+    last_remind = today_entry.get("last_remind_time", 0)
+    remind_due = (time.time() * 1000 - last_remind) >= SEDENTARY_REMIND_MIN * 60 * 1000
+    if in_window and (not today_entry.get("sedentary_notified") or (follow_up and remind_due)) and not today_entry.get("pending_notify"):
         reminded = True
         today_entry["sedentary_notified"] = True
+        today_entry["last_remind_time"] = int(time.time() * 1000)
     today_entry["follow_up"] = True   # 进入/保持 5 分钟复查模式
     return True, idle_min, reminded
 
@@ -717,8 +726,11 @@ def log(msg):
     print(f"[{datetime.now().strftime('%H:%M:%S')}] {msg}", flush=True)
 
 def main():
-    global TOKEN
+    global TOKEN, SEDENTARY_MIN, SEDENTARY_REMIND_MIN
     TOKEN = load_token()
+    # 久坐阈值/提醒间隔由 Tauri 侧 settings 传入，用户改设置后立即生效
+    SEDENTARY_MIN = max(5, _ARGS.sed_min)
+    SEDENTARY_REMIND_MIN = max(5, _ARGS.remind_min)
 
     # 如果 token 仍然过期（刷新失败），不要调 API 覆盖好数据
     if is_token_expired():

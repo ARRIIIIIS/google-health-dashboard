@@ -39,6 +39,8 @@ struct Settings {
     pos_y: i32,
     respect_dnd: bool, // 勿扰时是否抑制久坐提醒
     widget_visible: bool, // 小组件主窗口是否显示
+    sedentary_min: u64, // 连续不动超过此时长(分钟)判定久坐
+    sedentary_remind_min: u64, // 久坐后每隔多久复查提醒一次(分钟)
     google_client_id: String,
     google_client_secret: String,
     llm_base_url: String,
@@ -59,6 +61,8 @@ impl Default for Settings {
             pos_y: 60,
             respect_dnd: true,
             widget_visible: true,
+            sedentary_min: 45,
+            sedentary_remind_min: 30,
             google_client_id: String::new(),
             google_client_secret: String::new(),
             llm_base_url: String::new(),
@@ -341,6 +345,19 @@ fn sync_main_widget(app: &AppHandle, s: &Settings) {
     if let Some(win) = app.get_webview_window("main") {
         if s.widget_visible {
             let _ = win.show();
+            // macOS 坑：desktop level + Accessory 激活策略下，hide() 后 show() 有时不恢复显示。
+            // 用 orderFrontRegardless 无视应用激活状态强制前置，并重设窗口层级/去阴影。
+            #[cfg(target_os = "macos")]
+            unsafe {
+                use objc::{msg_send, sel, sel_impl};
+                use objc::runtime::Object;
+                if let Ok(ns) = win.ns_window() {
+                    let ns = ns as *mut Object;
+                    let _: () = msg_send![ns, setLevel: -2147483602i64];
+                    let _: () = msg_send![ns, setHasShadow: false];
+                    let _: () = msg_send![ns, orderFrontRegardless];
+                }
+            }
             let (cx, cy) = clamp_to_screens(s.pos_x, s.pos_y, &collect_displays(), 344, 272);
             let _ = win.set_position(tauri::PhysicalPosition::new(cx, cy));
             // 保存修正后的坐标
@@ -429,7 +446,7 @@ fn paths(app: &AppHandle) -> (PathBuf, PathBuf, PathBuf, PathBuf) {
 }
 
 /// 运行一次 Python 采集（写 data.json）
-fn run_fetch_once(py: &Path, data: &Path, tok: &Path, cfg: &Path) -> std::io::Result<()> {
+fn run_fetch_once(py: &Path, data: &Path, tok: &Path, cfg: &Path, sed_min: u64, remind_min: u64) -> std::io::Result<()> {
     if let Some(parent) = data.parent() {
         let _ = std::fs::create_dir_all(parent);
     }
@@ -442,6 +459,10 @@ fn run_fetch_once(py: &Path, data: &Path, tok: &Path, cfg: &Path) -> std::io::Re
         .arg(tok)
         .arg("--config")
         .arg(cfg)
+        .arg("--sed-min")
+        .arg(sed_min.to_string())
+        .arg("--remind-min")
+        .arg(remind_min.to_string())
         .status()?;
     if !status.success() {
         eprintln!("[health] python fetch exited with {:?}", status.code());
@@ -612,7 +633,12 @@ fn refresh_data(app: &AppHandle) {
     let app = app.clone();
     std::thread::spawn(move || {
         let (py, data, tok, cfg) = paths(&app);
-        let _ = run_fetch_once(&py, &data, &tok, &cfg);
+        let (sed_min, remind_min) = {
+            let sh = app.state::<SettingsHandle>();
+            let g = sh.0.lock().unwrap();
+            (g.sedentary_min, g.sedentary_remind_min)
+        };
+        let _ = run_fetch_once(&py, &data, &tok, &cfg, sed_min, remind_min);
     });
 }
 
@@ -1013,6 +1039,11 @@ fn main() {
                 ) {
                     eprintln!("[health] apply_vibrancy failed: {:?}", e);
                 }
+                // 保险：vibrancy 挂载后再关一次窗口阴影，防止底部投影残留
+                unsafe {
+                    let ns = win.ns_window().expect("ns_window") as *mut Object;
+                    let _: () = msg_send![ns, setHasShadow: false];
+                }
                 // 应用上次保存的位置
                 let _ = win.set_position(tauri::PhysicalPosition::new(settings.pos_x, settings.pos_y));
 
@@ -1172,7 +1203,13 @@ fn main() {
             let handle = app.handle().clone();
             std::thread::spawn(move || loop {
                 let (py, data, tok, cfg) = paths(&handle);
-                let _ = run_fetch_once(&py, &data, &tok, &cfg);
+                // 久坐阈值/提醒间隔每次采集前读最新设置，改设置立即生效
+                let (sed_min, remind_min) = {
+                    let sh = handle.state::<SettingsHandle>();
+                    let g = sh.0.lock().unwrap();
+                    (g.sedentary_min, g.sedentary_remind_min)
+                };
+                let _ = run_fetch_once(&py, &data, &tok, &cfg, sed_min, remind_min);
                 let secs = {
                     let state = handle.try_state::<RefreshState>();
                     match state {
