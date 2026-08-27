@@ -375,12 +375,9 @@ fn rebuild_tray_menu(app: &AppHandle) {
 #[cfg(not(target_os = "macos"))]
 fn rebuild_tray_menu(_app: &AppHandle) {}
 
-/// 关掉主窗口所有阴影（窗口级 + contentView layer shadow）。
-/// 递归遍历子视图在 objc 跨 FFI 边界容易触发 panic_cannot_unwind，故改用最小集：
-/// NSWindow 自身 setHasShadow(false) + contentView 自己的 layer shadowOpacity=0。
-/// NSVisualEffectView / NSGlassEffectView 由液态玻璃 / vibrancy 插件在内部管理其
-/// layer shadow 属性，这里只关它自己 layer 上的 shadow（如果有），
-/// 不递归到子层以避免跨 FFI 边界 panic。
+/// 关掉 NSWindow 系统阴影，保留液态玻璃/ vibrancy 的折射光晕。
+/// NSGlassEffectView / NSVisualEffectView 通过 layer.shadow* 实现折射/高光，
+/// 这是液态玻璃的核心视觉特征，不能关。只关 NSWindow 自身的 setHasShadow。
 #[cfg(target_os = "macos")]
 fn disable_window_shadow(win: &tauri::WebviewWindow) {
     use objc::{msg_send, sel, sel_impl};
@@ -388,14 +385,6 @@ fn disable_window_shadow(win: &tauri::WebviewWindow) {
         let ns = ns as *mut objc::runtime::Object;
         unsafe {
             let _: () = msg_send![ns, setHasShadow: false];
-            let cv: *mut objc::runtime::Object = msg_send![ns, contentView];
-            if !cv.is_null() {
-                let layer: *mut objc::runtime::Object = msg_send![cv, layer];
-                if !layer.is_null() {
-                    let _: () = msg_send![layer, setShadowOpacity: 0.0_f32];
-                    let _: () = msg_send![layer, setShadowRadius: 0.0_f32];
-                }
-            }
         }
     }
 }
