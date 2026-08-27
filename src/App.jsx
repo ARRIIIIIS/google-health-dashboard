@@ -142,6 +142,11 @@ function SettingsPanel({ draft, setDraft, onSave, onCancel, busy, rerender, syst
   const set = (k, v) => setDraft((d) => ({ ...d, [k]: v }));
   const guideCard = { background: "rgba(128,128,128,0.08)", border: "1px solid " + C.hairline, borderRadius: 12, padding: "9px 11px", marginTop: 6 };
   const guideBtn = { display: "inline-block", marginTop: 7, fontSize: 10, fontWeight: 600, color: "#fff", background: C.blue, padding: "5px 11px", borderRadius: 8, cursor: "pointer" };
+  const sedCard = {
+    background: "linear-gradient(135deg, rgba(255,159,10,0.10) 0%, rgba(255,159,10,0.03) 100%)",
+    border: "1px solid rgba(255,159,10,0.22)", borderRadius: 14, padding: "10px 12px 12px", marginTop: 6, marginBottom: 6,
+  };
+  const sedLabel = { fontSize: 10.5, fontWeight: 600, color: C.amber, marginTop: 7, display: "block" };
 
   const inputStyle = {
     width: "100%", boxSizing: "border-box", fontSize: 11, color: C.label,
@@ -173,6 +178,35 @@ function SettingsPanel({ draft, setDraft, onSave, onCancel, busy, rerender, syst
       }}
     >
       <div style={{ fontSize: 13, fontWeight: 700, color: C.label, marginBottom: 6 }}>{T("settingsTitle")}</div>
+
+      {/* ── 久坐提醒（置顶高亮卡片：自定义阈值 / 提醒间隔）── */}
+      <div style={sedCard}>
+        <div style={{ fontSize: 11, fontWeight: 700, color: C.amber, marginBottom: 7 }}>
+          {ICO.chair}{" 久坐提醒"}
+        </div>
+        <label style={sedLabel}>{T("sedThreshold")}</label>
+        <div style={{ display: "flex", gap: 5, flexWrap: "wrap" }}>
+          {[30, 45, 60, 90].map((m) => (
+            <div key={m} onClick={() => set("sedentary_min", m)}
+              style={{ flex: 1, textAlign: "center", fontSize: 10, fontWeight: 600, padding: "4px 0", borderRadius: 8, cursor: "pointer",
+                background: (draft.sedentary_min || 45) === m ? C.amber : "rgba(128,128,128,0.14)",
+                color: (draft.sedentary_min || 45) === m ? "#fff" : C.second }}>
+              {m} {T("minUnit")}
+            </div>
+          ))}
+        </div>
+        <label style={sedLabel}>{T("sedRemind")}</label>
+        <div style={{ display: "flex", gap: 5, flexWrap: "wrap" }}>
+          {[15, 30, 60].map((m) => (
+            <div key={m} onClick={() => set("sedentary_remind_min", m)}
+              style={{ flex: 1, textAlign: "center", fontSize: 10, fontWeight: 600, padding: "4px 0", borderRadius: 8, cursor: "pointer",
+                background: (draft.sedentary_remind_min || 30) === m ? C.amber : "rgba(128,128,128,0.14)",
+                color: (draft.sedentary_remind_min || 30) === m ? "#fff" : C.second }}>
+              {m} {T("minUnit")}
+            </div>
+          ))}
+        </div>
+      </div>
 
       {/* ── 语言（单选）── */}
       <label style={labelStyle}>{T("language")}</label>
@@ -251,30 +285,6 @@ function SettingsPanel({ draft, setDraft, onSave, onCancel, busy, rerender, syst
             background: draft.respect_dnd ? C.green : "rgba(128,128,128,0.3)" }}>
           <div style={{ width: 17, height: 17, borderRadius: "50%", background: "#fff", marginLeft: draft.respect_dnd ? 17 : 0, transition: "margin .2s" }} />
         </div>
-      </div>
-
-      {/* ── 久坐提醒（自定义阈值 / 提醒间隔）── */}
-      <label style={labelStyle}>{T("sedThreshold")}</label>
-      <div style={{ display: "flex", gap: 5, flexWrap: "wrap" }}>
-        {[30, 45, 60, 90].map((m) => (
-          <div key={m} onClick={() => set("sedentary_min", m)}
-            style={{ fontSize: 10, fontWeight: 600, padding: "4px 9px", borderRadius: 8, cursor: "pointer",
-              background: (draft.sedentary_min || 45) === m ? C.amber : "rgba(128,128,128,0.14)",
-              color: (draft.sedentary_min || 45) === m ? "#fff" : C.second }}>
-            {m} {T("minUnit")}
-          </div>
-        ))}
-      </div>
-      <label style={labelStyle}>{T("sedRemind")}</label>
-      <div style={{ display: "flex", gap: 5, flexWrap: "wrap" }}>
-        {[15, 30, 60].map((m) => (
-          <div key={m} onClick={() => set("sedentary_remind_min", m)}
-            style={{ fontSize: 10, fontWeight: 600, padding: "4px 9px", borderRadius: 8, cursor: "pointer",
-              background: (draft.sedentary_remind_min || 30) === m ? C.amber : "rgba(128,128,128,0.14)",
-              color: (draft.sedentary_remind_min || 30) === m ? "#fff" : C.second }}>
-            {m} {T("minUnit")}
-          </div>
-        ))}
       </div>
 
       <div style={{ height: 1, background: C.hairline, margin: "10px 0 4px" }} />
