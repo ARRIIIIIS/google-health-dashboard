@@ -131,6 +131,8 @@ struct MenuStrings {
     refresh_5: String,
     refresh_15: String,
     refresh_30: String,
+    sed_sub: String,
+    min_unit: String,
     refresh_now: String,
     open_folder: String,
     setup_wizard: String,
@@ -149,6 +151,11 @@ struct MenuItems {
     refresh_5: tauri::menu::CheckMenuItem<tauri::Wry>,
     refresh_15: tauri::menu::CheckMenuItem<tauri::Wry>,
     refresh_30: tauri::menu::CheckMenuItem<tauri::Wry>,
+    sed_30: tauri::menu::CheckMenuItem<tauri::Wry>,
+    sed_40: tauri::menu::CheckMenuItem<tauri::Wry>,
+    sed_45: tauri::menu::CheckMenuItem<tauri::Wry>,
+    sed_60: tauri::menu::CheckMenuItem<tauri::Wry>,
+    sed_90: tauri::menu::CheckMenuItem<tauri::Wry>,
     visible: tauri::menu::CheckMenuItem<tauri::Wry>,
     autostart: tauri::menu::CheckMenuItem<tauri::Wry>,
     respect_dnd: tauri::menu::CheckMenuItem<tauri::Wry>,
@@ -177,6 +184,13 @@ fn menu_radio(group: &str, on: &str, it: &MenuItems) {
             set(&it.refresh_15, on == "refresh_15");
             set(&it.refresh_30, on == "refresh_30");
         }
+        "sed" => {
+            set(&it.sed_30, on == "sed_30");
+            set(&it.sed_40, on == "sed_40");
+            set(&it.sed_45, on == "sed_45");
+            set(&it.sed_60, on == "sed_60");
+            set(&it.sed_90, on == "sed_90");
+        }
         _ => {}
     }
 }
@@ -187,8 +201,8 @@ fn menu_strings(lang: &str) -> MenuStrings {
     match lang {
         "en" => MenuStrings {
             show_widget: "Show Widget".into(),
-            theme_sub: "Theme".into(),
-            theme_auto: "Auto".into(),
+            theme_sub: "Appearance".into(),
+            theme_auto: "Follow System".into(),
             theme_light: "Light".into(),
             theme_dark: "Dark".into(),
             lang_sub: "Language".into(),
@@ -196,20 +210,22 @@ fn menu_strings(lang: &str) -> MenuStrings {
             lang_en: "English".into(),
             lang_ja: "Japanese".into(),
             autostart: "Launch at Login".into(),
-            respect_dnd: "Silent in DND".into(),
-            refresh_sub: "Refresh Interval".into(),
+            respect_dnd: "Silent during Focus".into(),
+            refresh_sub: "Data Refresh".into(),
             refresh_5: "5 min".into(),
             refresh_15: "15 min".into(),
             refresh_30: "30 min".into(),
+            sed_sub: "Sedentary Reminder".into(),
+            min_unit: "min".into(),
             refresh_now: "Refresh Now".into(),
             open_folder: "Open Data Folder".into(),
-            setup_wizard: "Setup Wizard…".into(),
+            setup_wizard: "Settings…".into(),
             quit: "Quit".into(),
         },
         "ja" => MenuStrings {
             show_widget: "ウィジェットを表示".into(),
-            theme_sub: "テーマ".into(),
-            theme_auto: "自動".into(),
+            theme_sub: "外観".into(),
+            theme_auto: "システムに従う".into(),
             theme_light: "ライト".into(),
             theme_dark: "ダーク".into(),
             lang_sub: "言語".into(),
@@ -217,20 +233,22 @@ fn menu_strings(lang: &str) -> MenuStrings {
             lang_en: "English".into(),
             lang_ja: "日本語".into(),
             autostart: "ログイン時に起動".into(),
-            respect_dnd: "集中モードで非表示".into(),
-            refresh_sub: "更新間隔".into(),
+            respect_dnd: "集中モード中は静かに".into(),
+            refresh_sub: "データ更新".into(),
             refresh_5: "5 分".into(),
             refresh_15: "15 分".into(),
             refresh_30: "30 分".into(),
+            sed_sub: "座りっぱなし通知".into(),
+            min_unit: "分".into(),
             refresh_now: "今すぐ更新".into(),
             open_folder: "データフォルダを開く".into(),
-            setup_wizard: "セットアップウィザード…".into(),
+            setup_wizard: "設定…".into(),
             quit: "終了".into(),
         },
         _ => MenuStrings {
             show_widget: "显示小组件".into(),
-            theme_sub: "主题".into(),
-            theme_auto: "自动".into(),
+            theme_sub: "外观".into(),
+            theme_auto: "跟随系统".into(),
             theme_light: "浅色".into(),
             theme_dark: "深色".into(),
             lang_sub: "语言".into(),
@@ -238,14 +256,16 @@ fn menu_strings(lang: &str) -> MenuStrings {
             lang_en: "English".into(),
             lang_ja: "日本語".into(),
             autostart: "开机自启动".into(),
-            respect_dnd: "勿扰时静默".into(),
-            refresh_sub: "刷新间隔".into(),
+            respect_dnd: "免打扰时静默".into(),
+            refresh_sub: "数据更新".into(),
             refresh_5: "5 分钟".into(),
             refresh_15: "15 分钟".into(),
             refresh_30: "30 分钟".into(),
+            sed_sub: "久坐提醒".into(),
+            min_unit: "分钟".into(),
             refresh_now: "立即刷新".into(),
             open_folder: "打开数据目录".into(),
-            setup_wizard: "设置向导…".into(),
+            setup_wizard: "设置…".into(),
             quit: "退出".into(),
         },
     }
@@ -283,6 +303,17 @@ fn build_main_menu(app: &AppHandle, s: &Settings) -> tauri::menu::Menu<tauri::Wr
         &[&refresh_5, &refresh_15, &refresh_30]
     ).unwrap();
 
+    // ── 久坐提醒子菜单（阈值 30/40/45/60/90 直接平铺）──
+    let sed_30 = CheckMenuItem::with_id(app, "sed_30", &format!("{} {}", 30, m.min_unit), true, s.sedentary_min == 30, None::<&str>).unwrap();
+    let sed_40 = CheckMenuItem::with_id(app, "sed_40", &format!("{} {}", 40, m.min_unit), true, s.sedentary_min == 40, None::<&str>).unwrap();
+    let sed_45 = CheckMenuItem::with_id(app, "sed_45", &format!("{} {}", 45, m.min_unit), true, s.sedentary_min == 45, None::<&str>).unwrap();
+    let sed_60 = CheckMenuItem::with_id(app, "sed_60", &format!("{} {}", 60, m.min_unit), true, s.sedentary_min == 60, None::<&str>).unwrap();
+    let sed_90 = CheckMenuItem::with_id(app, "sed_90", &format!("{} {}", 90, m.min_unit), true, s.sedentary_min == 90, None::<&str>).unwrap();
+    let sed_sub = Submenu::with_id_and_items(
+        app, "sed_menu", &m.sed_sub, true,
+        &[&sed_30, &sed_40, &sed_45, &sed_60, &sed_90]
+    ).unwrap();
+
     // ── 基础项 ──
     let toggle_visible = CheckMenuItem::with_id(app, "toggle_visible", &m.show_widget, true, s.widget_visible, None::<&str>).unwrap();
     let autostart  = CheckMenuItem::with_id(app, "toggle_autostart", &m.autostart,  true, s.autostart,    None::<&str>).unwrap();
@@ -295,12 +326,14 @@ fn build_main_menu(app: &AppHandle, s: &Settings) -> tauri::menu::Menu<tauri::Wr
     let mut items: Vec<&dyn IsMenuItem<tauri::Wry>> = Vec::new();
     items.push(&toggle_visible);
     items.push(&sep);
-    items.push(&theme_sub);
-    items.push(&lang_sub);
+    items.push(&refresh_sub);
+    items.push(&sed_sub);
     items.push(&sep);
     items.push(&autostart);
     items.push(&respect_dnd);
-    items.push(&refresh_sub);
+    items.push(&sep);
+    items.push(&theme_sub);
+    items.push(&lang_sub);
     items.push(&sep);
     items.push(&refresh_now);
     let setup_wizard_item = MenuItem::with_id(app, "open_setup", &m.setup_wizard, true, None::<&str>).unwrap();
@@ -317,6 +350,7 @@ fn build_main_menu(app: &AppHandle, s: &Settings) -> tauri::menu::Menu<tauri::Wr
             theme_auto, theme_light, theme_dark,
             lang_zh, lang_en, lang_ja,
             refresh_5, refresh_15, refresh_30,
+            sed_30, sed_40, sed_45, sed_60, sed_90,
             visible: toggle_visible,
             autostart,
             respect_dnd,
@@ -1173,6 +1207,12 @@ fn main() {
                             "refresh_5"  => { radio("refresh", "refresh_5");  sh.set("refresh_interval_min", 5u64);  s_changed = true; }
                             "refresh_15" => { radio("refresh", "refresh_15"); sh.set("refresh_interval_min", 15u64); s_changed = true; }
                             "refresh_30" => { radio("refresh", "refresh_30"); sh.set("refresh_interval_min", 30u64); s_changed = true; }
+                            // ── 久坐阈值 / 提醒间隔 ──
+                            "sed_30"  => { radio("sed", "sed_30");  sh.set("sedentary_min", 30u64); s_changed = true; }
+                            "sed_40"  => { radio("sed", "sed_40");  sh.set("sedentary_min", 40u64); s_changed = true; }
+                            "sed_45"  => { radio("sed", "sed_45");  sh.set("sedentary_min", 45u64); s_changed = true; }
+                            "sed_60"  => { radio("sed", "sed_60");  sh.set("sedentary_min", 60u64); s_changed = true; }
+                            "sed_90"  => { radio("sed", "sed_90");  sh.set("sedentary_min", 90u64); s_changed = true; }
                             // ── 布尔 toggle ──
                             "toggle_autostart" => {
                                 let cur = sh.0.lock().unwrap().autostart;

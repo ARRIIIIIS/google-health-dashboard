@@ -179,29 +179,18 @@ function SettingsPanel({ draft, setDraft, onSave, onCancel, busy, rerender, syst
     >
       <div style={{ fontSize: 13, fontWeight: 700, color: C.label, marginBottom: 6 }}>{T("settingsTitle")}</div>
 
-      {/* ── 久坐提醒（置顶高亮卡片：自定义阈值 / 提醒间隔）── */}
+      {/* ── 久坐提醒（置顶高亮卡片：自定义阈值）── */}
       <div style={sedCard}>
         <div style={{ fontSize: 11, fontWeight: 700, color: C.amber, marginBottom: 7 }}>
           {ICO.chair}{" 久坐提醒"}
         </div>
         <label style={sedLabel}>{T("sedThreshold")}</label>
         <div style={{ display: "flex", gap: 5, flexWrap: "wrap" }}>
-          {[30, 45, 60, 90].map((m) => (
+          {[30, 40, 45, 60, 90].map((m) => (
             <div key={m} onClick={() => set("sedentary_min", m)}
               style={{ flex: 1, textAlign: "center", fontSize: 10, fontWeight: 600, padding: "4px 0", borderRadius: 8, cursor: "pointer",
                 background: (draft.sedentary_min || 45) === m ? C.amber : "rgba(128,128,128,0.14)",
                 color: (draft.sedentary_min || 45) === m ? "#fff" : C.second }}>
-              {m} {T("minUnit")}
-            </div>
-          ))}
-        </div>
-        <label style={sedLabel}>{T("sedRemind")}</label>
-        <div style={{ display: "flex", gap: 5, flexWrap: "wrap" }}>
-          {[15, 30, 60].map((m) => (
-            <div key={m} onClick={() => set("sedentary_remind_min", m)}
-              style={{ flex: 1, textAlign: "center", fontSize: 10, fontWeight: 600, padding: "4px 0", borderRadius: 8, cursor: "pointer",
-                background: (draft.sedentary_remind_min || 30) === m ? C.amber : "rgba(128,128,128,0.14)",
-                color: (draft.sedentary_remind_min || 30) === m ? "#fff" : C.second }}>
               {m} {T("minUnit")}
             </div>
           ))}
@@ -612,7 +601,12 @@ export default function App() {
       setSettings(s);
       const lang = s.language || "zh-CN";
       setLang(lang);
-      const dark = s.theme === "dark" ? true : s.theme === "light" ? false : systemDark;
+      // 主动查询系统外观：启动时的 appearance-changed 事件可能早于监听器注册而丢失，
+      // 不查的话 systemDark 卡在初始值 true，导致「跟随系统」永远走深色
+      let sysDark = systemDark;
+      try { sysDark = (await invoke("get_appearance")) === "dark"; } catch (e) {}
+      setSystemDark(sysDark);
+      const dark = s.theme === "dark" ? true : s.theme === "light" ? false : sysDark;
       C = dark ? C_DARK : C_LIGHT;
       rerender();
     } catch (e) {}
