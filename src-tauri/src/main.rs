@@ -1251,8 +1251,12 @@ fn main() {
                                 let secs = new_s.refresh_interval_min.max(1) * 60;
                                 *app.state::<RefreshState>().0.lock().unwrap() = secs;
                             }
-                            // 同步主窗口显隐与位置（widget_visible / 选中屏幕）
-                            sync_main_widget(app, &new_s);
+                            // 仅 widget_visible/display 变化时才同步窗口显隐与位置，
+                            // 其他设置变化（久坐/刷新间隔/主题/语言/勿扰等）不需要重定位，
+                            // 否则每次菜单操作都会 set_position 导致窗口跳动
+                            if id == "toggle_visible" || id.starts_with("display_") {
+                                sync_main_widget(app, &new_s);
+                            }
                             // 总是重建菜单：保证 macOS 菜单勾选态与设置一致（消除多选视觉残留）
                             rebuild_tray_menu(app);
                         }
