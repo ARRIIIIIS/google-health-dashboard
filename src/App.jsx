@@ -327,7 +327,6 @@ function Widget({ data, settings, onRefresh, onReset, justResetAt, sedPopRef, dn
   const calories = t.calories;
   const sleep = t.sleep_asleep_min || 0;
   const tip = t.tip;
-  const level = t.tip_level || "good";
   const updated = t.updated_at;
   const sedentary = !!t.sedentary;
   const idleMin = t.idle_min != null ? t.idle_min : null;
@@ -480,7 +479,8 @@ function Widget({ data, settings, onRefresh, onReset, justResetAt, sedPopRef, dn
       { k: "deep", v: t.sleep_deep_min || 0, c: C.indigo },
     ];
     const sleepTotal = sleepStages.reduce(function (a, p) { return a + (p.v || 0); }, 0);
-    const tipDot = level === "alert" ? C.alert : level === "warn" ? C.amber : C.green;
+    // 圆点指示提示来源：绿色 = LLM 生效（AI tip / 正在分析），蓝色 = LLM 未配置或失败、回落到本地规则提示
+    const tipDot = bottomTip ? C.green : C.blue;
     // AI tip 优先；AI 未配置 / 请求失败（如欠费、超时）时回落到数据里的规则 tip，保证底部提示始终可见
     const tipText = cleanTip(bottomTip) || cleanTip(tip);
     const distStr = distance != null ? distance.toFixed(1) + "km" : "—";
