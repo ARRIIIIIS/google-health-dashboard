@@ -986,6 +986,14 @@ fn set_position(app: AppHandle, _display_id: i32, x: i32, y: i32) -> Result<Stri
 
 fn main() {
     tauri::Builder::default()
+        .plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| {
+            // 重复启动：不创建新实例，把已有主窗口带回桌面并聚焦
+            if let Some(win) = app.get_webview_window("main") {
+                let _ = win.unminimize();
+                let _ = win.show();
+                let _ = win.set_focus();
+            }
+        }))
         .plugin(tauri_plugin_liquid_glass::init())
         .setup(|app| {
             // macOS：强制 Accessory 激活策略（不在 Dock 显示、不抢菜单栏/焦点）
