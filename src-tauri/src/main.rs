@@ -1003,6 +1003,16 @@ fn main() {
                     let style: u64 = msg_send![ns, styleMask];
                     let _: () = msg_send![ns, setStyleMask: style | 128u64];
                 }
+                // 系统原生液态玻璃：NSVisualEffectView(HudWindow 材质) + 36px 圆角，
+                // 替代 CSS backdrop-filter（透明窗口上采样不到桌面背景，磨砂是假的）
+                if let Err(e) = window_vibrancy::apply_vibrancy(
+                    &win,
+                    window_vibrancy::NSVisualEffectMaterial::HudWindow,
+                    Some(window_vibrancy::NSVisualEffectState::Active),
+                    Some(36.0),
+                ) {
+                    eprintln!("[health] apply_vibrancy failed: {:?}", e);
+                }
                 // 应用上次保存的位置
                 let _ = win.set_position(tauri::PhysicalPosition::new(settings.pos_x, settings.pos_y));
 

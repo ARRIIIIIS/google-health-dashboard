@@ -32,7 +32,8 @@ const C_DARK = {
   label: "rgba(255,255,255,0.95)",
   second: "rgba(250,250,252,0.86)",
   third: "rgba(245,245,250,0.66)",
-  bg: "linear-gradient(160deg, rgba(58,58,64,0.46) 0%, rgba(26,26,30,0.34) 100%)",
+  // 用更浓的半透明底色压住系统玻璃的材质偏色，保持 Apple 暗色系统色 #1C1C1E 为主调
+  bg: "linear-gradient(160deg, rgba(44,44,46,0.82) 0%, rgba(28,28,30,0.78) 100%)",
   card: "rgba(255,255,255,0.07)",
   hairline: "rgba(255,255,255,0.08)",
   green: "#30D158",
@@ -82,20 +83,7 @@ const SQUIRCLE = (function () {
   return "path('" + p.map((q) => q[0].toFixed(2) + " " + q[1].toFixed(2)).join(" L ") + " Z')";
 })();
 
-// 磨砂微噪点（液态玻璃质感）：极低透明度的 SVG 湍流噪声，叠加在玻璃上增强真实磨砂颗粒感
-const GLASS_NOISE =
-  "url(\"data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='140' height='140'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='2' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E\")";
-
-// 玻璃表面叠加层：彩色晕染 + 顶部镜面高光 + 磨砂噪点（两种布局版本共用）
-function GlassFx() {
-  return (
-    <>
-      <div style={{ position: "absolute", inset: 0, pointerEvents: "none", background: "radial-gradient(circle at 0% 0%, rgba(255,45,85,0.12), transparent 42%), radial-gradient(circle at 100% 100%, rgba(10,132,255,0.12), transparent 42%)" }} />
-      <div style={{ position: "absolute", inset: 0, pointerEvents: "none", background: "linear-gradient(180deg, rgba(255,255,255,0.24) 0%, rgba(255,255,255,0.06) 13%, transparent 38%)" }} />
-      <div style={{ position: "absolute", inset: 0, pointerEvents: "none", backgroundImage: GLASS_NOISE, backgroundSize: "140px 140px", opacity: 0.045, mixBlendMode: "overlay" }} />
-    </>
-  );
-}
+// 磨砂由系统 NSVisualEffectView 提供（HudWindow 材质），前端不再模拟噪点/高光
 
 // ── Line icons ──────────────────────────────────────────────────────────────
 const SW = 2;
@@ -180,8 +168,7 @@ function SettingsPanel({ draft, setDraft, onSave, onCancel, busy, rerender, syst
       style={{
         position: "absolute", inset: 0, zIndex: 100, overflowY: "auto", overflowX: "hidden",
         padding: "12px 14px 16px", borderRadius: 36, WebkitClipPath: SQUIRCLE, clipPath: SQUIRCLE,
-        background: C.bg, backdropFilter: "blur(54px) saturate(1.9) brightness(1.06)",
-        WebkitBackdropFilter: "blur(54px) saturate(1.9) brightness(1.06)",
+        background: C.bg,
         border: "1px solid " + C.hairline, boxSizing: "border-box",
       }}
     >
@@ -431,14 +418,10 @@ function Widget({ data, settings, onRefresh, onReset, justResetAt, sedPopRef, dn
     WebkitClipPath: SQUIRCLE,
     display: "flex",
     flexDirection: "column",
-    // 多层 backdrop：更重的模糊 + 饱和 + 对比，营造折射磨砂的「液态玻璃」质感
-    backdropFilter: "blur(72px) saturate(2.4) brightness(1.08) contrast(1.07)",
-    WebkitBackdropFilter: "blur(72px) saturate(2.4) brightness(1.08) contrast(1.07)",
-    // 玻璃底色：在 C.bg 之上叠一层「顶部更亮、底部更暗」的渐变，模拟玻璃厚度与折射
-    background: "linear-gradient(150deg, rgba(255,255,255,0.18) 0%, rgba(255,255,255,0.04) 30%, rgba(0,0,0,0.06) 100%), " + C.bg,
-    // 玻璃棱边高光：顶部内描边亮、底部暗，强化真实玻璃边缘
-    boxShadow: "inset 0 1px 1.5px rgba(255,255,255,0.32), inset 0 -1px 1.5px rgba(0,0,0,0.16)",
-    border: "1px solid rgba(255,255,255,0.18)",
+    // 玻璃模糊由系统 NSVisualEffectView 提供；这里只叠半透明底色（C.bg 本身是渐变），透出系统玻璃
+    background: C.bg,
+    // 极淡描边区分玻璃与桌面
+    border: "1px solid rgba(255,255,255,0.14)",
     overflow: "hidden",
     position: "relative",
   };
@@ -469,7 +452,6 @@ function Widget({ data, settings, onRefresh, onReset, justResetAt, sedPopRef, dn
 
     return (
       <div style={Object.assign({}, glassStyle, { display: "flex", flexDirection: "column", gap: 8 })}>
-        <GlassFx />
         {header}
         <div style={{ display: "flex", alignItems: "flex-end", justifyContent: "space-between", padding: "0 4px", position: "relative" }}>
           <div style={{ display: "flex", flexDirection: "column" }}>
