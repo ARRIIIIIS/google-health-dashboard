@@ -32,11 +32,24 @@ const C_DARK = {
   label: "rgba(255,255,255,0.95)",
   second: "rgba(250,250,252,0.86)",
   third: "rgba(245,245,250,0.66)",
-  // 半透明底色让系统 NSVisualEffectView 的模糊背景透出来（太浓会盖成纯黑，太透会偏色）。
-  // 浅色主题 0.74 → 0.22：之前太蒙（盖住系统玻璃），现在让系统模糊真正透出来
-  bg: "linear-gradient(160deg, rgba(52,52,56,0.42) 0%, rgba(30,30,34,0.36) 100%)",
-  card: "rgba(255,255,255,0.07)",
+  // 液态玻璃五层背景（自下而上）：渐变描边(border-box) → 玻璃主体(padding-box) → 左上主光源光晕 → 顶部高光带 → 底部收口
+  // 配合 border:1px solid transparent 使用；外投影由 C.panelShadow 承担
+  bg: [
+    "linear-gradient(0deg, rgba(0,0,0,0.28) 0%, rgba(0,0,0,0) 9%)",
+    "linear-gradient(180deg, rgba(255,255,255,0.16) 0%, rgba(255,255,255,0) 12%)",
+    "radial-gradient(130% 100% at 50% -12%, rgba(255,255,255,0.14) 0%, rgba(255,255,255,0) 60%)",
+    "linear-gradient(168deg, rgba(255,255,255,0.10) 0%, rgba(255,255,255,0.05) 42%, rgba(255,255,255,0.08) 100%) padding-box",
+    "linear-gradient(168deg, rgba(255,255,255,0.45) 0%, rgba(255,255,255,0.18) 45%, rgba(0,0,0,0.20) 100%) border-box",
+  ].join(", "),
+  // 外投影（悬浮厚度）。注意：固定尺寸透明窗口下超出窗口部分会被裁掉，厚度感主要由描边渐变与内部光影承担
+  panelShadow: "0 12px 30px rgba(0,0,0,0.35), 0 3px 10px rgba(0,0,0,0.22)",
+  card: "rgba(255,255,255,0.05)",
   hairline: "rgba(255,255,255,0.08)",
+  // 玻璃内容分区亮分隔线（metrics 列间 / 行间），浅色下用白亮线才有玻璃切面感
+  divide: "rgba(255,255,255,0.14)",
+  rim: "rgba(255,255,255,0.25)",
+  rimSoft: "rgba(255,255,255,0.09)",
+  glassCtl: "rgba(255,255,255,0.08)",
   green: "#30D158",
   red: "#FF375F",
   blue: "#0A84FF",
@@ -49,11 +62,21 @@ const C_LIGHT = {
   label: "rgba(28,28,30,0.95)",
   second: "rgba(60,60,67,0.90)",
   third: "rgba(60,60,67,0.55)",
-  // 系统 NSVisualEffectView 提供真实液态玻璃模糊，前端只叠极薄白色 tint 提亮。
-  // 0.74 太重盖住玻璃 → 0.22 透出系统模糊；卡片/分隔线在浅色下也减弱
-  bg: "linear-gradient(160deg, rgba(255,255,255,0.28) 0%, rgba(245,245,247,0.18) 100%)",
-  card: "rgba(0,0,0,0.03)",
+  // 液态玻璃五层背景（浅色版）：渐变描边 → 玻璃主体 → 光晕 → 高光带 → 底部收口
+  bg: [
+    "linear-gradient(0deg, rgba(40,45,60,0.10) 0%, rgba(40,45,60,0) 9%)",
+    "linear-gradient(180deg, rgba(255,255,255,0.50) 0%, rgba(255,255,255,0) 12%)",
+    "radial-gradient(130% 100% at 50% -12%, rgba(255,255,255,0.60) 0%, rgba(255,255,255,0) 60%)",
+    "linear-gradient(168deg, rgba(255,255,255,0.38) 0%, rgba(255,255,255,0.20) 42%, rgba(255,255,255,0.30) 100%) padding-box",
+    "linear-gradient(168deg, rgba(255,255,255,0.95) 0%, rgba(255,255,255,0.40) 45%, rgba(150,155,170,0.45) 100%) border-box",
+  ].join(", "),
+  panelShadow: "0 12px 30px rgba(35,40,55,0.18), 0 3px 10px rgba(35,40,55,0.10)",
+  card: "rgba(0,0,0,0.02)",
   hairline: "rgba(0,0,0,0.07)",
+  divide: "rgba(255,255,255,0.45)",
+  rim: "rgba(255,255,255,0.65)",
+  rimSoft: "rgba(255,255,255,0.28)",
+  glassCtl: "rgba(255,255,255,0.20)",
   green: "#248A3D",
   red: "#D70015",
   blue: "#007AFF",
@@ -67,7 +90,7 @@ let C = C_DARK;
 
 // Apple 风格连续曲线（squircle）：用超椭圆(n=5)采样四角，替代正圆 border-radius
 const SQUIRCLE = (function () {
-  const w = 344, h = 272, r = 36, n = 5, k = 2 / n, seg = 20;
+  const w = 344, h = 272, r = 28, n = 5, k = 2 / n, seg = 20;
   const corners = [
     { cx: r, cy: r, sx: -1, sy: -1, t0: 0, t1: Math.PI / 2 },
     { cx: w - r, cy: r, sx: 1, sy: -1, t0: Math.PI / 2, t1: 0 },
@@ -143,17 +166,17 @@ function cleanTip(s) {
 // ── Settings panel（覆盖在小组件之上的滚动设置层）────────────────────────────
 function SettingsPanel({ draft, setDraft, onSave, onCancel, busy, rerender, systemDark }) {
   const set = (k, v) => setDraft((d) => ({ ...d, [k]: v }));
-  const guideCard = { background: "rgba(128,128,128,0.08)", border: "1px solid " + C.hairline, borderRadius: 12, padding: "9px 11px", marginTop: 6 };
-  const guideBtn = { display: "inline-block", marginTop: 7, fontSize: 10, fontWeight: 600, color: "#fff", background: C.blue, padding: "5px 11px", borderRadius: 8, cursor: "pointer" };
+  const guideCard = { background: C.glassCtl, boxShadow: "inset 0 0.5px 0 " + C.rimSoft, border: "1px solid " + C.hairline, borderRadius: 12, padding: "9px 11px", marginTop: 6 };
+  const guideBtn = { display: "inline-block", marginTop: 7, fontSize: 10, fontWeight: 600, color: "#fff", background: C.blue, boxShadow: "inset 0 0.5px 0 rgba(255,255,255,0.30)", padding: "5px 11px", borderRadius: 8, cursor: "pointer" };
   const sedCard = {
-    background: "linear-gradient(135deg, rgba(255,159,10,0.10) 0%, rgba(255,159,10,0.03) 100%)",
-    border: "1px solid rgba(255,159,10,0.22)", borderRadius: 14, padding: "10px 12px 12px", marginTop: 6, marginBottom: 6,
+    background: "linear-gradient(135deg, rgba(255,159,10,0.12) 0%, rgba(255,159,10,0.04) 100%)",
+    border: "1px solid rgba(255,159,10,0.22)", boxShadow: "inset 0 0.5px 0 rgba(255,235,200,0.20)", borderRadius: 14, padding: "10px 12px 12px", marginTop: 6, marginBottom: 6,
   };
   const sedLabel = { fontSize: 10.5, fontWeight: 600, color: C.amber, marginTop: 7, display: "block" };
 
   const inputStyle = {
     width: "100%", boxSizing: "border-box", fontSize: 11, color: C.label,
-    background: "rgba(128,128,128,0.14)", border: "1px solid " + C.hairline,
+    background: C.glassCtl, border: "1px solid " + C.hairline,
     borderRadius: 7, padding: "4px 7px", outline: "none",
   };
   const labelStyle = { fontSize: 10.5, fontWeight: 600, color: C.second, marginTop: 9, display: "block" };
@@ -171,13 +194,16 @@ function SettingsPanel({ draft, setDraft, onSave, onCancel, busy, rerender, syst
 
   return (
     <div
+      data-tauri-drag-region="false"
       onMouseDown={(e) => e.stopPropagation()}
       onContextMenu={(e) => e.preventDefault()}
       style={{
         position: "absolute", inset: 0, zIndex: 100, overflowY: "auto", overflowX: "hidden",
-        padding: "12px 14px 16px", borderRadius: 36, WebkitClipPath: SQUIRCLE, clipPath: SQUIRCLE,
+        padding: "12px 14px 16px", borderRadius: 28, WebkitClipPath: SQUIRCLE, clipPath: SQUIRCLE,
         background: C.bg,
-        border: "1px solid " + C.hairline, boxSizing: "border-box",
+        border: "1px solid transparent",
+        boxShadow: C.panelShadow + ", inset 0 1px 0 " + C.rim,
+        boxSizing: "border-box",
       }}
     >
       <div style={{ fontSize: 13, fontWeight: 700, color: C.label, marginBottom: 6 }}>{T("settingsTitle")}</div>
@@ -192,7 +218,7 @@ function SettingsPanel({ draft, setDraft, onSave, onCancel, busy, rerender, syst
           {[30, 40, 45, 60, 90].map((m) => (
             <div key={m} onClick={() => set("sedentary_min", m)}
               style={{ flex: 1, textAlign: "center", fontSize: 10, fontWeight: 600, padding: "4px 0", borderRadius: 8, cursor: "pointer",
-                background: (draft.sedentary_min || 45) === m ? C.amber : "rgba(128,128,128,0.14)",
+                background: (draft.sedentary_min || 45) === m ? C.amber : C.glassCtl,
                 color: (draft.sedentary_min || 45) === m ? "#fff" : C.second }}>
               {m} {T("minUnit")}
             </div>
@@ -229,7 +255,7 @@ function SettingsPanel({ draft, setDraft, onSave, onCancel, busy, rerender, syst
             rerender();
           }}
             style={{ flex: 1, textAlign: "center", fontSize: 10, fontWeight: 600, padding: "5px 0", borderRadius: 8, cursor: "pointer",
-              background: draft.theme === v ? C.blue : "rgba(128,128,128,0.14)", color: draft.theme === v ? "#fff" : C.second }}>
+              background: draft.theme === v ? C.blue : C.glassCtl, color: draft.theme === v ? "#fff" : C.second }}>
             {lbl}
           </div>
         ))}
@@ -244,7 +270,7 @@ function SettingsPanel({ draft, setDraft, onSave, onCancel, busy, rerender, syst
             invoke("update_refresh_interval", { seconds: m * 60 }).catch(() => {});
           }}
             style={{ fontSize: 10, fontWeight: 600, padding: "4px 9px", borderRadius: 8, cursor: "pointer",
-              background: draft.refresh_interval_min === m ? C.blue : "rgba(128,128,128,0.14)",
+              background: draft.refresh_interval_min === m ? C.blue : C.glassCtl,
               color: draft.refresh_interval_min === m ? "#fff" : C.second }}>
             {m} min
           </div>
@@ -260,7 +286,7 @@ function SettingsPanel({ draft, setDraft, onSave, onCancel, busy, rerender, syst
           invoke("toggle_autostart_setting", { enabled: next }).catch(() => {});
         }}
           style={{ width: 38, height: 21, borderRadius: 99, padding: 2, cursor: "pointer",
-            background: draft.autostart ? C.green : "rgba(128,128,128,0.3)", transition: "background .2s" }}>
+            background: draft.autostart ? C.green : C.card, transition: "background .2s" }}>
           <div style={{ width: 17, height: 17, borderRadius: "50%", background: "#fff", marginLeft: draft.autostart ? 17 : 0, transition: "margin .2s" }} />
         </div>
       </div>
@@ -274,7 +300,7 @@ function SettingsPanel({ draft, setDraft, onSave, onCancel, busy, rerender, syst
           invoke("toggle_dnd_setting", { enabled: next }).catch(() => {});
         }}
           style={{ width: 38, height: 21, borderRadius: 99, padding: 2, cursor: "pointer", flexShrink: 0,
-            background: draft.respect_dnd ? C.green : "rgba(128,128,128,0.3)" }}>
+            background: draft.respect_dnd ? C.green : C.card }}>
           <div style={{ width: 17, height: 17, borderRadius: "50%", background: "#fff", marginLeft: draft.respect_dnd ? 17 : 0, transition: "margin .2s" }} />
         </div>
       </div>
@@ -297,8 +323,8 @@ function SettingsPanel({ draft, setDraft, onSave, onCancel, busy, rerender, syst
 
       {/* 保存 / 取消 */}
       <div style={{ display: "flex", gap: 8, marginTop: 14 }}>
-        <div onClick={onCancel} style={{ flex: 1, textAlign: "center", fontSize: 11, fontWeight: 600, color: C.second, border: "1px solid " + C.hairline, padding: "7px 0", borderRadius: 9, cursor: "pointer" }}>{T("cancel")}</div>
-        <div onClick={busy ? undefined : onSave} style={{ flex: 1, textAlign: "center", fontSize: 11, fontWeight: 700, color: "#fff", background: C.blue, padding: "7px 0", borderRadius: 9, cursor: busy ? "default" : "pointer", opacity: busy ? 0.6 : 1 }}>{T("save")}</div>
+        <div onClick={onCancel} style={{ flex: 1, textAlign: "center", fontSize: 11, fontWeight: 600, color: C.second, background: C.glassCtl, boxShadow: "inset 0 0.5px 0 " + C.rimSoft, border: "1px solid " + C.hairline, padding: "7px 0", borderRadius: 9, cursor: "pointer" }}>{T("cancel")}</div>
+        <div onClick={busy ? undefined : onSave} style={{ flex: 1, textAlign: "center", fontSize: 11, fontWeight: 700, color: "#fff", background: C.blue, boxShadow: "inset 0 0.5px 0 rgba(255,255,255,0.30)", padding: "7px 0", borderRadius: 9, cursor: busy ? "default" : "pointer", opacity: busy ? 0.6 : 1 }}>{T("save")}</div>
       </div>
     </div>
   );
@@ -392,8 +418,8 @@ function Widget({ data, settings, onRefresh, onReset, justResetAt, sedPopRef, dn
     <div data-tauri-drag-region="false" style={{ position: "relative", width: 52, height: 52, flexShrink: 0, zIndex: 10 }}>
       {ballIframe}
       {effSed && effIdle != null && (
-        <div ref={function (el) { sedPopRef.current = el; }} style={{ position: "absolute", top: "calc(100% + 8px)", left: "50%", marginLeft: -93, width: 186, zIndex: 50, borderRadius: 12, padding: "9px 11px 8px", background: "rgba(38,30,18,0.92)", backdropFilter: "blur(20px)", WebkitBackdropFilter: "blur(20px)", border: "1px solid rgba(255,159,10,0.45)", boxShadow: "0 12px 32px rgba(0,0,0,0.55), 0 0 24px rgba(255,159,10,0.10)", display: showSedPop ? "block" : "none", animation: "sed-pop .4s cubic-bezier(.2,.9,.3,1.15)" }}>
-          <div style={{ position: "absolute", top: -4.5, left: "50%", marginLeft: -4.5, width: 9, height: 9, background: "rgba(38,30,18,0.92)", borderLeft: "1px solid rgba(255,159,10,0.45)", borderTop: "1px solid rgba(255,159,10,0.45)", transform: "rotate(45deg)" }} />
+        <div ref={function (el) { sedPopRef.current = el; }} style={{ position: "absolute", top: "calc(100% + 8px)", left: "50%", marginLeft: -93, width: 186, zIndex: 50, borderRadius: 12, padding: "9px 11px 8px", background: "linear-gradient(160deg, rgba(58,46,26,0.62) 0%, rgba(38,30,18,0.55) 100%)", backdropFilter: "blur(20px)", WebkitBackdropFilter: "blur(20px)", border: "1px solid rgba(255,159,10,0.45)", boxShadow: "inset 0 1px 0 rgba(255,235,200,0.22), 0 12px 32px rgba(0,0,0,0.55), 0 0 24px rgba(255,159,10,0.10)", display: showSedPop ? "block" : "none", animation: "sed-pop .4s cubic-bezier(.2,.9,.3,1.15)" }}>
+          <div style={{ position: "absolute", top: -4.5, left: "50%", marginLeft: -4.5, width: 9, height: 9, background: "linear-gradient(160deg, rgba(58,46,26,0.66) 0%, rgba(38,30,18,0.55) 100%)", borderLeft: "1px solid rgba(255,159,10,0.45)", borderTop: "1px solid rgba(255,159,10,0.45)", transform: "rotate(45deg)" }} />
           <div style={{ fontSize: 10.5, fontWeight: 700, color: C.amber, letterSpacing: 0.2, display: "flex", alignItems: "center", gap: 5 }}>
             {ICO.chair}<span>{T("sedentaryMin", { m: idleMin })}</span>
           </div>
@@ -408,7 +434,7 @@ function Widget({ data, settings, onRefresh, onReset, justResetAt, sedPopRef, dn
   );
 
   const idleChip = effIdle != null ? (
-    <div data-tauri-drag-region="false" title={effSed ? "久坐中 · 点击开/关提醒" : "静坐计时"} onMouseDown={function (e) { e.preventDefault(); if (!effSed || !sedPopRef.current) return; const vis = sedPopRef.current.style.display !== "none"; sedPopRef.current.style.display = vis ? "none" : "block"; if (vis) dismissSedPop(); else { try { localStorage.removeItem(SED_POP_KEY); } catch (err) {} } }} style={{ display: "flex", alignItems: "center", gap: 5, height: 19, padding: "0 8px 0 6px", borderRadius: 99, flexShrink: 0, fontSize: 9, fontWeight: 600, letterSpacing: 0.2, fontVariantNumeric: "tabular-nums", cursor: effSed ? "pointer" : "default", ...(effSed ? { background: "rgba(255,159,10,0.16)", color: C.amber, animation: "sed-pulse 2.2s ease-in-out infinite" } : { background: C.card, color: C.third }) }}>
+    <div data-tauri-drag-region="false" title={effSed ? "久坐中 · 点击开/关提醒" : "静坐计时"} onMouseDown={function (e) { e.preventDefault(); if (!effSed || !sedPopRef.current) return; const vis = sedPopRef.current.style.display !== "none"; sedPopRef.current.style.display = vis ? "none" : "block"; if (vis) dismissSedPop(); else { try { localStorage.removeItem(SED_POP_KEY); } catch (err) {} } }} style={{ display: "flex", alignItems: "center", gap: 5, height: 19, padding: "0 8px 0 6px", borderRadius: 99, flexShrink: 0, fontSize: 9, fontWeight: 600, letterSpacing: 0.2, fontVariantNumeric: "tabular-nums", cursor: effSed ? "pointer" : "default", ...(effSed ? { background: "rgba(255,159,10,0.16)", color: C.amber, animation: "sed-pulse 2.2s ease-in-out infinite" } : { background: C.glassCtl, boxShadow: "inset 0 0.5px 0 " + C.rimSoft, color: C.third }) }}>
       {ICO.chair}<span>{effIdle} min</span>
     </div>
   ) : null;
@@ -428,7 +454,7 @@ function Widget({ data, settings, onRefresh, onReset, justResetAt, sedPopRef, dn
       {idleChip}
       <span style={{ fontSize: 9, fontWeight: 500, color: C.third, fontVariantNumeric: "tabular-nums" }}>{updated || fmtTime(now)}</span>
       {/* 设置入口已移至菜单栏 */}
-      <div data-tauri-drag-region="false" className="hd-refresh-btn" onMouseDown={function (e) { e.preventDefault(); e.stopPropagation(); if (e.button !== 0) return; onRefresh(); }} title={T("refreshTitle")} style={{ width: 19, height: 19, borderRadius: "50%", background: "rgba(255,255,255,0.08)", display: "flex", alignItems: "center", justifyContent: "center", cursor: "pointer", flexShrink: 0, color: C.second }}>
+      <div data-tauri-drag-region="false" className="hd-refresh-btn" onMouseDown={function (e) { e.preventDefault(); e.stopPropagation(); if (e.button !== 0) return; onRefresh(); }} title={T("refreshTitle")} style={{ width: 19, height: 19, borderRadius: "50%", background: C.glassCtl, boxShadow: "inset 0 0.5px 0 " + C.rim, display: "flex", alignItems: "center", justifyContent: "center", cursor: "pointer", flexShrink: 0, color: C.second, transition: "background .15s" }}>
         {ICO.refresh}
       </div>
     </div>
@@ -439,15 +465,22 @@ function Widget({ data, settings, onRefresh, onReset, justResetAt, sedPopRef, dn
     height: "100%",
     boxSizing: "border-box",
     padding: "12px 14px",
-    borderRadius: "36px",
+    borderRadius: "28px",
     clipPath: SQUIRCLE,
     WebkitClipPath: SQUIRCLE,
     display: "flex",
     flexDirection: "column",
-    // 玻璃模糊由系统 NSVisualEffectView 提供；这里只叠半透明底色（C.bg 本身是渐变），透出系统玻璃
+    // 玻璃模糊由系统 NSVisualEffectView 提供；C.bg 是五层液态玻璃背景（渐变描边+主体+光晕+高光带+底部收口）
     background: C.bg,
-    // 克制的高光：顶部一道极淡内描边模拟玻璃棱边，不做厚重反光
-    boxShadow: "inset 0 1px 0 rgba(255,255,255,0.13), inset 0 -0.5px 0 rgba(0,0,0,0.08)",
+    // 渐变描边要求 border 透明（描边颜色画在 border-box 层）
+    border: "1px solid transparent",
+    // CSS 模糊与系统 vibrancy 叠加：WKWebView 透明后 backdrop-filter 可模糊窗口后的内容，
+    // 与 Popover 磨砂叠加出真正的液态玻璃质感（不生效时也无害，磨砂仍由 vibrancy 提供）
+    backdropFilter: "blur(18px) saturate(1.3)",
+    WebkitBackdropFilter: "blur(18px) saturate(1.3)",
+    // 液态玻璃厚度：外投影悬浮 + 顶部一道亮棱（受光）。
+    // 不做四边 inset 棱线——左右侧棱会在圆角处与上下棱交叠出暗角（V1 教训）
+    boxShadow: C.panelShadow + ", inset 0 1px 0 " + C.rim,
     overflow: "hidden",
     position: "relative",
   };
@@ -490,13 +523,13 @@ function Widget({ data, settings, onRefresh, onReset, justResetAt, sedPopRef, dn
             <span style={{ fontSize: 14, fontWeight: 600, color: C.green, fontVariantNumeric: "tabular-nums" }}>{active != null ? active : "—"}<span style={{ fontSize: 9, color: C.third, fontWeight: 500 }}> {T("minActive")}</span></span>
           </div>
         </div>
-        <div style={{ height: 3, borderRadius: 1.5, background: C.card, overflow: "hidden", position: "relative" }}>
+        <div style={{ height: 3, borderRadius: 1.5, background: C.card, overflow: "hidden", position: "relative", boxShadow: "inset 0 0.5px 0 " + C.rimSoft }}>
           <div style={{ height: "100%", borderRadius: 1.5, width: stepPct + "%", background: "linear-gradient(90deg,#8BF2A8,#30D158)" }} />
         </div>
-        <div style={{ display: "flex", padding: "7px 0", borderTop: "1px solid " + C.hairline, borderBottom: "1px solid " + C.hairline, position: "relative" }}>
+        <div style={{ display: "flex", padding: "7px 0", borderTop: "1px solid " + C.divide, borderBottom: "1px solid " + C.divide, position: "relative" }}>
           {metrics.map(function (m, i) {
             return (
-              <div key={i} style={{ flex: 1, display: "flex", flexDirection: "column", alignItems: "center", gap: 2, position: "relative", ...(i > 0 ? { borderLeft: "1px solid " + C.hairline } : {}) }}>
+              <div key={i} style={{ flex: 1, display: "flex", flexDirection: "column", alignItems: "center", gap: 2, position: "relative", ...(i > 0 ? { borderLeft: "1px solid " + C.divide } : {}) }}>
                 <span style={{ fontSize: 8, color: C.third, fontWeight: 500, letterSpacing: 0.3 }}>{m.label}</span>
                 <span style={{ fontSize: 15, fontWeight: 600, color: m.color, letterSpacing: -0.3, fontVariantNumeric: "tabular-nums" }}>{m.value != null ? m.value : "—"}</span>
                 <span style={{ fontSize: 7.5, color: C.third, fontWeight: 500 }}>{m.unit}</span>
@@ -808,7 +841,7 @@ export default function App() {
   const bottomTip = aiThinking ? T("aiThinking") : (aiTip || null);
 
   return (
-    <div onContextMenuCapture={(e) => e.preventDefault()} style={{ width: "100%", height: "100%", position: "relative", userSelect: "none", WebkitUserSelect: "none", WebkitTouchCallout: "none", WebkitUserDrag: "none" }}>
+    <div data-tauri-drag-region onContextMenuCapture={(e) => e.preventDefault()} style={{ width: "100%", height: "100%", minHeight: 272, overflow: "hidden", position: "relative", userSelect: "none", WebkitUserSelect: "none", WebkitTouchCallout: "none", WebkitUserDrag: "none" }}>
       {data ? (
         <Widget
           data={data}

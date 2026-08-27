@@ -8,3 +8,4 @@ release/
 vite.config.js.timestamp-*.mjs
 __pycache__/
 *.pyc
+*.bak-*

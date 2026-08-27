@@ -1112,8 +1112,10 @@ fn main() {
                     let cls = class!(NSVisualEffectView);
                     let vibrancy: *mut Object = msg_send![cls, alloc];
                     let vibrancy: *mut Object = msg_send![vibrancy, initWithFrame: frame];
-                    // HudWindow material (10)
-                    let _: () = msg_send![vibrancy, setMaterial: 10i64];
+                    // Popover material (6)：浅色外观下是半透明磨砂玻璃（最接近液态玻璃观感）。
+                    // 注意 10 是 WindowBackground（近不透明白板/深板，模糊极弱，之前"白底无玻璃感"根因），
+                    // 真正的 HUDWindow 是 11（但恒为深色调，浅色主题下突兀），故用 Popover。
+                    let _: () = msg_send![vibrancy, setMaterial: 6i64];
                     // BehindWindow blending mode (0)
                     let _: () = msg_send![vibrancy, setBlendingMode: 0i64];
                     // Inactive state (1) — 锁定浅色，窗口激活不切换
@@ -1132,6 +1134,10 @@ fn main() {
                 disable_window_shadow(&win);
                 // vibrancy / 液态玻璃挂载后再清理一次阴影（递归关闭所有子视图 layer shadow）
                 disable_window_shadow(&win);
+                // 运行时显式把 WKWebView 背景设为全透明：仅靠 tauri.conf.json 的
+                // backgroundColor:#00000000 在部分 macOS/WKWebView 组合下不生效，
+                // underPageBackgroundColor 仍为白 → 盖住 vibrancy 磨砂（白底白条）
+                let _ = win.set_background_color(Some(tauri::webview::Color(0, 0, 0, 0)));
                 // 应用上次保存的位置
                 let _ = win.set_position(tauri::PhysicalPosition::new(settings.pos_x, settings.pos_y));
 

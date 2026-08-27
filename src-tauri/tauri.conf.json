@@ -30,7 +30,8 @@
         "skipTaskbar": true,
         "center": false,
         "x": 20,
-        "y": 60
+        "y": 60,
+        "backgroundColor": "#00000000"
       }
     ]
   },

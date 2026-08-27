@@ -1,10 +1,17 @@
 /* 全局：桌面小组件窗口为固定 344×272，禁止 body 滚动/边距，避免内容溢出出现滚动条 */
 html,
-body {
+body,
+#root {
   margin: 0;
   padding: 0;
+  width: 100%;
   height: 100%;
   overflow: hidden;
+  /* WKWebView 自己有白底，必须显式 transparent 才能让系统 NSVisualEffectView 的磨砂透出来
+     （tauri.conf.json 的 backgroundColor 也必须同步为零 alpha，双保险）
+     #root 必须有 height:100%：React 挂载点若无高度，根容器 height:100% 会塌缩成内容高度，
+     窗口底部会露出 WKWebView 白底（表现为白底与小组件底部高度不匹配） */
+  background: transparent;
   font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "PingFang SC", "Helvetica Neue", "Microsoft YaHei", sans-serif;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
@@ -43,4 +50,13 @@ body {
 }
 body.hd-refreshing .hd-refresh-btn svg {
   animation: hd-spin 0.9s linear infinite;
+}
+
+/* 液态玻璃：可点控件 hover 即时提亮（不等刷新周期） */
+.hd-refresh-btn:hover {
+  background: rgba(255, 255, 255, 0.18) !important;
+}
+.hd-refresh-btn:active {
+  background: rgba(255, 255, 255, 0.24) !important;
+  transform: scale(0.92);
 }
