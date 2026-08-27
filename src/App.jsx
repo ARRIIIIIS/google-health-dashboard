@@ -9,7 +9,6 @@ import { invoke } from "@tauri-apps/api/core";
 import { t as T, setLang, getLang, LANGS } from "./i18n.js";
 
 // 设置引导页（浏览器中完成 Google 授权 / AI 配置）。改目标改这里即可。
-// 设置引导页（浏览器中完成 Google 授权 / AI 配置）。改目标改这里即可。
 const GOOGLE_SETUP_URL = "https://github.com/ARRIIIIIS/google-health-dashboard#%E5%AE%89%E8%A3%85";
 const AI_SETUP_URL = "https://github.com/ARRIIIIIS/google-health-dashboard#%E5%AE%89%E8%A3%85";
 
@@ -101,28 +100,6 @@ function GlassFx() {
 // ── Line icons ──────────────────────────────────────────────────────────────
 const SW = 2;
 const ICO = {
-  heart: (
-    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={SW} strokeLinecap="round" strokeLinejoin="round">
-      <path d="M20.8 4.6a5.5 5.5 0 0 0-7.8 0L12 5.7l-1-1a5.5 5.5 0 0 0-7.8 7.8L12 21.2l8.8-8.7a5.5 5.5 0 0 0 0-7.9z" />
-    </svg>
-  ),
-  pulse: (
-    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={SW} strokeLinecap="round" strokeLinejoin="round">
-      <polyline points="2 12 6.5 12 9.5 4.5 14.5 19.5 17.5 12 22 12" />
-    </svg>
-  ),
-  drop: (
-    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={SW} strokeLinecap="round" strokeLinejoin="round">
-      <path d="M12 2.8s6.4 6.9 6.4 11.1a6.4 6.4 0 0 1-12.8 0C5.6 9.7 12 2.8 12 2.8z" />
-    </svg>
-  ),
-  wind: (
-    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={SW} strokeLinecap="round" strokeLinejoin="round">
-      <path d="M9.6 4.6A2 2 0 1 1 11 8H2" />
-      <path d="M12.6 19.4A2 2 0 1 0 14 16H2" />
-      <path d="M17.3 7.3a2.5 2.5 0 1 1 2 4.2H2" />
-    </svg>
-  ),
   refresh: (
     <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={SW} strokeLinecap="round" strokeLinejoin="round">
       <path d="M21 12a9 9 0 1 1-2.6-6.4" />
@@ -133,12 +110,6 @@ const ICO = {
     <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={SW} strokeLinecap="round" strokeLinejoin="round">
       <path d="M6 3v8" /><path d="M18 3v8" /><path d="M6 5h12" /><path d="M6 11h12" />
       <path d="M8 11v7a2 2 0 0 1-2 2" /><path d="M18 11v7a2 2 0 0 0 2 2" /><path d="M8 14h8" />
-    </svg>
-  ),
-  gear: (
-    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={SW} strokeLinecap="round" strokeLinejoin="round">
-      <circle cx="12" cy="12" r="3" />
-      <path d="M19.4 15a1.7 1.7 0 0 0 .3 1.9l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.9-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 0 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.9.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.9 1.7 1.7 0 0 0-1.5-1H3a2 2 0 0 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.9l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.9.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 0 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.9-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.9V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 0 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z" />
     </svg>
   ),
 };
@@ -176,143 +147,6 @@ function cleanTip(s) {
     .replace(/[🀀-🿿﻿‍]/gu, "")
     .replace(/\s{2,}/g, " ")
     .trim();
-}
-
-// ── Steps ring: Apple Activity style (A 版 · 圆环+卡片) ──────────────────────
-function Ring({ value, max, sz }) {
-  sz = sz || 88;
-  const sw = 8;
-  const r = (sz - sw) / 2;
-  const circ = 2 * Math.PI * r;
-  const pct = Math.min(100, (value || 0) / max * 100);
-  const dash = (pct / 100) * circ;
-  return (
-    <div style={{ position: "relative", width: sz, height: sz, flexShrink: 0 }}>
-      <svg width={sz} height={sz} style={{ transform: "rotate(-90deg)", display: "block" }}>
-        <defs>
-          <linearGradient id="ring-g" x1="0%" y1="0%" x2="100%" y2="100%">
-            <stop offset="0%" stopColor="#8BF2A8" />
-            <stop offset="100%" stopColor="#30D158" />
-          </linearGradient>
-        </defs>
-        <circle cx={sz / 2} cy={sz / 2} r={r} fill="none" stroke="rgba(255,255,255,0.10)" strokeWidth={sw} />
-        {value != null && (
-          <circle cx={sz / 2} cy={sz / 2} r={r} fill="none" stroke="url(#ring-g)" strokeWidth={sw} strokeDasharray={dash + " " + (circ - dash)} strokeLinecap="round" />
-        )}
-      </svg>
-      <div style={{ position: "absolute", inset: 0, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: 2 }}>
-        <span style={{ fontSize: 22, fontWeight: 600, color: C.label, lineHeight: 1, letterSpacing: -0.5, fontVariantNumeric: "tabular-nums" }}>{value != null ? value : "—"}</span>
-        <span style={{ fontSize: 9, fontWeight: 500, color: C.second, lineHeight: 1 }}>{T("stepsUnit")}</span>
-      </div>
-    </div>
-  );
-}
-
-// ── Background trend (A 版 · 圆环+卡片) ──────────────────────────────────────
-function TrendBg({ data, color, id }) {
-  const pts = (data || []).map(function (v, i) { return v == null ? null : { i, v }; });
-  const vals = pts.filter(function (p) { return p; });
-  if (vals.length < 2) return null;
-  const W = 100, H = 30;
-  const min = Math.min.apply(null, vals.map(function (p) { return p.v; }));
-  const max = Math.max.apply(null, vals.map(function (p) { return p.v; }));
-  const range = max - min || 1;
-  const x = function (i) { return (i / (pts.length - 1 || 1)) * W; };
-  const y = function (v) { return H - 3 - ((v - min) / range) * (H - 6); };
-
-  let segs = [], cur = [];
-  pts.forEach(function (p) {
-    if (p) cur.push(p);
-    else { if (cur.length > 1) segs.push(cur); cur = []; }
-  });
-  if (cur.length > 1) segs.push(cur);
-
-  return (
-    <svg width="100%" height="100%" viewBox={"0 0 " + W + " " + H} preserveAspectRatio="none" style={{ position: "absolute", inset: 0, display: "block", pointerEvents: "none" }}>
-      <defs>
-        <linearGradient id={id} x1="0" y1="0" x2="0" y2="1">
-          <stop offset="0%" stopColor={color} stopOpacity={0.16} />
-          <stop offset="100%" stopColor={color} stopOpacity={0} />
-        </linearGradient>
-      </defs>
-      {segs.map(function (s, si) {
-        const line = s.map(function (p) { return x(p.i).toFixed(1) + "," + y(p.v).toFixed(1); }).join(" ");
-        const area = "M" + line + " L" + x(s[s.length - 1].i).toFixed(1) + "," + H + " L" + x(s[0].i).toFixed(1) + "," + H + " Z";
-        return (
-          <g key={si}>
-            <path d={area} fill={"url(#" + id + ")"} />
-            <polyline points={line} fill="none" stroke={color} strokeWidth={1.2} strokeLinecap="round" strokeLinejoin="round" vectorEffect="non-scaling-stroke" opacity={0.55} />
-          </g>
-        );
-      })}
-    </svg>
-  );
-}
-
-// ── Metric card (A 版 · 圆环+卡片) ───────────────────────────────────────────
-function Card({ accent, icon, value, unit, label, trend, id }) {
-  return (
-    <div style={{ position: "relative", background: C.card, borderRadius: 12, overflow: "hidden", display: "flex", alignItems: "center", gap: 8, padding: "8px 9px", flex: 1, minWidth: 0, backdropFilter: "blur(6px)", WebkitBackdropFilter: "blur(6px)" }}>
-      <div style={{ position: "absolute", left: 0, right: 0, bottom: 0, height: "70%", overflow: "hidden", pointerEvents: "none" }}>
-        <TrendBg data={trend} color={accent} id={id} />
-      </div>
-      <div style={{ position: "relative", zIndex: 1, width: 23, height: 23, borderRadius: 6, background: accent + "22", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0, color: accent }}>{icon}</div>
-      <div style={{ position: "relative", zIndex: 1, flex: 1, minWidth: 0, overflow: "hidden" }}>
-        <div style={{ fontSize: 14, fontWeight: 600, color: C.label, lineHeight: 1.1, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis", letterSpacing: -0.2, fontVariantNumeric: "tabular-nums" }}>
-          {value != null ? value : "—"}
-          <span style={{ fontSize: 8.5, fontWeight: 500, color: C.second, marginLeft: 2.5 }}>{unit}</span>
-        </div>
-        <div style={{ fontSize: 9, color: C.second, marginTop: 2, fontWeight: 500, lineHeight: 1 }}>{label}</div>
-      </div>
-    </div>
-  );
-}
-
-// ── Sleep row (A 版 · 圆环+卡片) ─────────────────────────────────────────────
-function SleepRow({ asleep, awake, light, deep, rem }) {
-  const stages = [
-    { k: "awake", v: awake || 0, c: "rgba(152,152,157,0.55)" },
-    { k: "rem", v: rem || 0, c: C.amber },
-    { k: "light", v: light || 0, c: C.teal },
-    { k: "deep", v: deep || 0, c: C.indigo },
-  ];
-  const total = stages.reduce(function (a, p) { return a + (p.v || 0); }, 0);
-  const h = function (min) { return min ? Math.round((min / 60) * 10) / 10 + "h" : null; };
-  const marks = [
-    { n: "深", v: deep },
-    { n: "REM", v: rem },
-    { n: "浅", v: light },
-  ].filter(function (p) { return p.v; });
-  return (
-    <div>
-      <div style={{ height: 4, borderRadius: 2, overflow: "hidden", display: "flex", opacity: asleep ? 0.85 : 0.25 }}>
-        {(total ? stages : [{ k: "x", v: 1, c: "rgba(255,255,255,0.10)" }]).map(function (p) {
-          return <div key={p.k} style={{ flex: Math.max(p.v, 0.001), background: p.c, height: "100%" }} />;
-        })}
-      </div>
-      <div style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between", marginTop: 7, padding: "0 2px", gap: 8 }}>
-        <span style={{ display: "flex", alignItems: "baseline", gap: 6, flexShrink: 0 }}>
-          <span style={{ fontSize: 10, fontWeight: 500, color: C.third }}>{T("sleep")}</span>
-          <span style={{ fontSize: 12, fontWeight: 600, color: C.second, lineHeight: 1, letterSpacing: -0.2, fontVariantNumeric: "tabular-nums" }}>{fmtSleep(asleep) || "—"}</span>
-        </span>
-        <span style={{ fontSize: 10, color: C.third, fontWeight: 500, lineHeight: 1.2, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis", textAlign: "right", fontVariantNumeric: "tabular-nums", minWidth: 0 }}>
-          {marks.length ? marks.map(function (p) { return p.n + " " + h(p.v); }).join(" · ") : "暂无阶段数据"}
-        </span>
-      </div>
-    </div>
-  );
-}
-
-// ── Tip ─────────────────────────────────────────────────────────────────────
-function Tip({ tip, level }) {
-  const dot = level === "alert" ? C.alert : level === "warn" ? C.amber : C.green;
-  const text = cleanTip(tip);
-  return (
-    <div style={{ display: "flex", alignItems: "center", gap: 6, padding: "0 2px" }}>
-      <span style={{ width: 4, height: 4, borderRadius: "50%", background: dot, opacity: 0.9, flexShrink: 0 }} />
-      <span style={{ fontSize: 10, color: C.second, fontWeight: 500, lineHeight: 1.25, flex: 1, overflow: "hidden", display: "-webkit-box", WebkitLineClamp: 2, WebkitBoxOrient: "vertical" }}>{text}</span>
-    </div>
-  );
 }
 
 // ── Settings panel（覆盖在小组件之上的滚动设置层）────────────────────────────
@@ -474,26 +308,12 @@ function Widget({ data, settings, onRefresh, onReset, justResetAt, sedPopRef, dn
   const distance = t.distance;
   const calories = t.calories;
   const sleep = t.sleep_asleep_min || 0;
-  const tip = t.tip;
   const level = t.tip_level || "good";
   const updated = t.updated_at;
   const sedentary = !!t.sedentary;
   const idleMin = t.idle_min != null ? t.idle_min : null;
 
   const now = new Date();
-  const hist = Array.isArray(data.history) ? data.history : [];
-
-  const rhrSeries = hist.map(function (e) { return e.resting_hr; });
-  if (resting != null) rhrSeries.push(resting);
-  const hrvSeries = hist.map(function (e) { return e.hrv; });
-  if (hrv != null) hrvSeries.push(hrv);
-  const spo2Series = hist.map(function (e) { return e.spo2; });
-  if (spo2 != null) spo2Series.push(spo2);
-  const respSeries = hist.map(function (e) { return e.respiratory_rate; });
-  if (resp != null) respSeries.push(resp);
-
-  let mode = "b";
-  try { mode = localStorage.getItem("health-widget-layout-v3") || "b"; } catch (e) {}
 
   const justReset = (Date.now() - justResetAt) < 90000;
   const effSed = justReset ? false : sedentary;
@@ -576,7 +396,7 @@ function Widget({ data, settings, onRefresh, onReset, justResetAt, sedPopRef, dn
   );
 
   const idleChip = effIdle != null ? (
-    <div data-tauri-drag-region="false" title={effSed ? "久坐中 · 点击开/关提醒" : "静坐计时"} onMouseDown={function (e) { e.preventDefault(); if (!effSed || !sedPopRef.current) return; const vis = sedPopRef.current.style.display !== "none"; sedPopRef.current.style.display = vis ? "none" : "block"; if (vis) dismissSedPop(); else { try { localStorage.removeItem(SED_POP_KEY); } catch (err) {} } }} style={{ display: "flex", alignItems: "center", gap: 5, height: 19, padding: "0 8px 0 6px", borderRadius: 99, flexShrink: 0, fontSize: 9, fontWeight: 600, letterSpacing: 0.2, fontVariantNumeric: "tabular-nums", cursor: effSed ? "pointer" : "default", ...(effSed ? { background: "rgba(255,159,10,0.16)", color: C.amber, animation: "sed-pulse 2.2s ease-in-out infinite" } : { background: "rgba(255,255,255,0.07)", color: "rgba(235,235,245,0.45)" }) }}>
+    <div data-tauri-drag-region="false" title={effSed ? "久坐中 · 点击开/关提醒" : "静坐计时"} onMouseDown={function (e) { e.preventDefault(); if (!effSed || !sedPopRef.current) return; const vis = sedPopRef.current.style.display !== "none"; sedPopRef.current.style.display = vis ? "none" : "block"; if (vis) dismissSedPop(); else { try { localStorage.removeItem(SED_POP_KEY); } catch (err) {} } }} style={{ display: "flex", alignItems: "center", gap: 5, height: 19, padding: "0 8px 0 6px", borderRadius: 99, flexShrink: 0, fontSize: 9, fontWeight: 600, letterSpacing: 0.2, fontVariantNumeric: "tabular-nums", cursor: effSed ? "pointer" : "default", ...(effSed ? { background: "rgba(255,159,10,0.16)", color: C.amber, animation: "sed-pulse 2.2s ease-in-out infinite" } : { background: C.card, color: C.third }) }}>
       {ICO.chair}<span>{effIdle} min</span>
     </div>
   ) : null;
@@ -624,8 +444,8 @@ function Widget({ data, settings, onRefresh, onReset, justResetAt, sedPopRef, dn
     position: "relative",
   };
 
-  // ── B 版 · 极简数字风 ──
-  if (mode === "b") {
+  // ── 极简数字风（唯一布局）──
+  {
     const stepGoal = 8000;
     const stepPct = Math.min(100, Math.round((steps / stepGoal) * 100));
     const metrics = [
@@ -642,10 +462,11 @@ function Widget({ data, settings, onRefresh, onReset, justResetAt, sedPopRef, dn
     ];
     const sleepTotal = sleepStages.reduce(function (a, p) { return a + (p.v || 0); }, 0);
     const tipDot = level === "alert" ? C.alert : level === "warn" ? C.amber : C.green;
-    const tipText = cleanTip(bottomTip) || cleanTip(tip);
+    // 与旧 A 版行为统一：仅在配置了 LLM 时显示底部提示，避免露出写死固定文案
+    const tipText = hasLlm ? cleanTip(bottomTip) : null;
     const distStr = distance != null ? distance.toFixed(1) + "km" : "—";
-    const calStr = calories != null ? calories + " 千卡" : "";
-    const midLine = T("stepsUnit") + " · 距离 " + distStr + " · " + calStr;
+    const calStr = calories != null ? calories + " " + T("kcal") : "";
+    const midLine = T("stepsUnit") + " · " + T("distance") + " " + distStr + (calStr ? " · " + calStr : "");
 
     return (
       <div style={Object.assign({}, glassStyle, { display: "flex", flexDirection: "column", gap: 8 })}>
@@ -662,7 +483,7 @@ function Widget({ data, settings, onRefresh, onReset, justResetAt, sedPopRef, dn
             <span style={{ fontSize: 14, fontWeight: 600, color: C.green, fontVariantNumeric: "tabular-nums" }}>{active != null ? active : "—"}<span style={{ fontSize: 9, color: C.third, fontWeight: 500 }}> {T("minActive")}</span></span>
           </div>
         </div>
-        <div style={{ height: 3, borderRadius: 1.5, background: "rgba(255,255,255,0.06)", overflow: "hidden", position: "relative" }}>
+        <div style={{ height: 3, borderRadius: 1.5, background: C.card, overflow: "hidden", position: "relative" }}>
           <div style={{ height: "100%", borderRadius: 1.5, width: stepPct + "%", background: "linear-gradient(90deg,#8BF2A8,#30D158)" }} />
         </div>
         <div style={{ display: "flex", padding: "7px 0", borderTop: "1px solid " + C.hairline, borderBottom: "1px solid " + C.hairline, position: "relative" }}>
@@ -680,9 +501,9 @@ function Widget({ data, settings, onRefresh, onReset, justResetAt, sedPopRef, dn
           <span style={{ fontSize: 9, color: C.third, fontWeight: 500, flexShrink: 0 }}>{T("sleep")}</span>
           <span style={{ fontSize: 12, fontWeight: 600, color: C.label, fontVariantNumeric: "tabular-nums", flexShrink: 0 }}>{fmtSleep(sleep) || "—"}</span>
           <div style={{ flex: 1, height: 4, borderRadius: 2, overflow: "hidden", display: "flex" }}>
-            {(sleepTotal ? sleepStages : [{ k: "x", v: 1, c: "rgba(255,255,255,0.10)" }]).map(function (p) { return <div key={p.k} style={{ flex: Math.max(p.v, 0.001), background: p.c, height: "100%" }} />; })}
+            {(sleepTotal ? sleepStages : [{ k: "x", v: 1, c: C.hairline }]).map(function (p) { return <div key={p.k} style={{ flex: Math.max(p.v, 0.001), background: p.c, height: "100%" }} />; })}
           </div>
-          <span style={{ fontSize: 8.5, color: C.third, flexShrink: 0, fontVariantNumeric: "tabular-nums" }}>{t.sleep_deep_min ? "深" + t.sleep_deep_min + "·REM" + (t.sleep_rem_min || 0) : ""}</span>
+          <span style={{ fontSize: 8.5, color: C.third, flexShrink: 0, fontVariantNumeric: "tabular-nums" }}>{t.sleep_deep_min ? T("deepShort") + t.sleep_deep_min + "·REM" + (t.sleep_rem_min || 0) : ""}</span>
         </div>
         {tipText && (
           <div style={{ display: "flex", alignItems: "center", gap: 6, padding: "0 2px", position: "relative" }}>
@@ -693,38 +514,6 @@ function Widget({ data, settings, onRefresh, onReset, justResetAt, sedPopRef, dn
       </div>
     );
   }
-
-  // ── A 版 · 圆环 + 卡片 ──
-  return (
-    <div style={Object.assign({}, glassStyle, { gap: 8 })}>
-      <GlassFx />
-      {header}
-      <div style={{ display: "flex", gap: 12, flex: 1, minHeight: 0, alignItems: "center" }}>
-        <div style={{ display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: 6, flexShrink: 0 }}>
-          <Ring value={steps > 0 ? String(steps) : null} max={8000} />
-          <span style={{ fontSize: 9, fontWeight: 500, color: C.second, fontVariantNumeric: "tabular-nums" }}>{active != null ? active : "—"}<span style={{ color: C.third }}> {T("minActive")}</span></span>
-        </div>
-        <div style={{ display: "flex", flexDirection: "column", gap: 7, flex: 1, minWidth: 0, justifyContent: "center" }}>
-          <div style={{ display: "flex", gap: 7 }}>
-            <Card accent={C.red} icon={ICO.heart} value={hrVal} label={hrLabel} unit={T("bpm")} id="tr-rhr" trend={rhrSeries} />
-            <Card accent={C.blue} icon={ICO.pulse} value={hrv} label={T("hrv")} unit={T("ms")} id="tr-hrv" trend={hrvSeries} />
-          </div>
-          <div style={{ display: "flex", gap: 7 }}>
-            <Card accent={C.teal} icon={ICO.drop} value={spo2} label={T("spo2")} unit={T("pct")} id="tr-spo2" trend={spo2Series} />
-            <Card accent={C.indigo} icon={ICO.wind} value={resp} label={T("resp")} unit={T("perMin")} id="tr-resp" trend={respSeries} />
-          </div>
-        </div>
-      </div>
-      <div style={{ display: "flex", flexDirection: "column", marginTop: -2 }}>
-        <SleepRow asleep={sleep} awake={t.sleep_awake_min} light={t.sleep_light_min} deep={t.sleep_deep_min} rem={t.sleep_rem_min} />
-        {bottomTip && hasLlm && (
-          <div style={{ marginTop: 9 }}>
-            <Tip tip={bottomTip} level={level} />
-          </div>
-        )}
-      </div>
-    </div>
-  );
 }
 
 // ── App：数据加载 + 轮询 + Tauri IPC + 设置 ────────────────────────────────────
@@ -748,6 +537,9 @@ async function genAiTip(data, settings) {
   const sys  = "你是一个亲近、理性的健康助理。仔细对比“今日”与“昨日”的数据，按以下规则输出：\n1. 一句中文，20字以内，不超过一行。\n2. 必须明确指出“今日”与“昨日”的区别（增多/减少/差不多）。\n3. 给出有针对性、可执行的建议（例：多走动、早睡、补水等）。\n4. 口吻亲切自然，像朋友提醒，不堆话、不用表情、不用专业术语。\n5. 重复多样性：同一数据多选一样句式不同。";
   const user = JSON.stringify(comparison) + "\n随机因子:" + Math.random();
   try {
+    // 15 秒超时：接口挂起时及时放弃，避免“正在分析…”永远不消失
+    const ctl = new AbortController();
+    const timer = setTimeout(() => ctl.abort(), 15000);
     const r = await fetch(url, {
       method: "POST",
       headers: { "Content-Type": "application/json", Authorization: "Bearer " + settings.llm_api_key },
@@ -756,7 +548,9 @@ async function genAiTip(data, settings) {
         messages: [{ role: "system", content: sys }, { role: "user", content: user }],
         temperature: 0.9, max_tokens: 128,
       }),
+      signal: ctl.signal,
     });
+    clearTimeout(timer);
     if (!r.ok) return null;
     const j = await r.json();
     const c = j.choices && j.choices[0] && j.choices[0].message && (j.choices[0].message.content || j.choices[0].message.reasoning_content);
