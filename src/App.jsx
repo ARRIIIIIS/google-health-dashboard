@@ -32,16 +32,15 @@ const C_DARK = {
   label: "rgba(255,255,255,0.95)",
   second: "rgba(250,250,252,0.86)",
   third: "rgba(245,245,250,0.66)",
-  // 半透明底色让系统 NSVisualEffectView 的模糊背景透出来（太浓会盖成纯黑，太透会偏色）。
-  // 浅色 0.74 → 0.22（eee49c7）→ 再降到 0.10/0.05 让系统玻璃真正透出来（用户「很透」的偏好）
-  bg: "linear-gradient(160deg, rgba(52,52,56,0.20) 0%, rgba(30,30,34,0.15) 100%)",
-  card: "rgba(255,255,255,0.07)",
-  hairline: "rgba(255,255,255,0.08)",
-  // 玻璃顶棱（受光），供主面板/控件统一引用
-  rim: "rgba(255,255,255,0.18)",
-  rimSoft: "rgba(255,255,255,0.07)",
+  // 深色下要「透」但也要「浮得起来」：加深 tint 让面板与壁纸拉开对比（用户反馈对比度不够）
+  bg: "linear-gradient(160deg, rgba(48,48,54,0.34) 0%, rgba(26,26,30,0.26) 100%)",
+  card: "rgba(255,255,255,0.10)",
+  hairline: "rgba(255,255,255,0.12)",
+  // 玻璃顶棱（受光），深色下提亮才能看清面板边界
+  rim: "rgba(255,255,255,0.30)",
+  rimSoft: "rgba(255,255,255,0.12)",
   // 玻璃控件底（刷新按钮/芯片/设置控件统一）
-  glassCtl: "rgba(255,255,255,0.06)",
+  glassCtl: "rgba(255,255,255,0.10)",
   green: "#30D158",
   red: "#FF375F",
   blue: "#0A84FF",
@@ -459,7 +458,7 @@ function Widget({ data, settings, onRefresh, onReset, justResetAt, sedPopRef, dn
     backdropFilter: "blur(18px) saturate(1.3)",
     WebkitBackdropFilter: "blur(18px) saturate(1.3)",
     // 顶部亮棱（受光）+ 底部暗收口，无四向棱线（圆角处交叠出暗角）也无外投影（透明窗口裁直角）
-    boxShadow: "inset 0 1px 0 " + C.rim + ", inset 0 -0.5px 0 rgba(0,0,0,0.10)",
+    boxShadow: "inset 0 1px 0 " + C.rim + ", inset 0 -0.5px 0 rgba(0,0,0,0.16)",
     overflow: "hidden",
     position: "relative",
   };
