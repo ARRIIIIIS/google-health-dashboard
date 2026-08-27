@@ -801,7 +801,7 @@ export default function App() {
   const bottomTip = aiThinking ? T("aiThinking") : (aiTip || null);
 
   return (
-    <div style={{ width: "100%", height: "100%", position: "relative", userSelect: "none", WebkitUserSelect: "none", WebkitTouchCallout: "none", WebkitUserDrag: "none" }}>
+    <div onContextMenuCapture={(e) => e.preventDefault()} style={{ width: "100%", height: "100%", position: "relative", userSelect: "none", WebkitUserSelect: "none", WebkitTouchCallout: "none", WebkitUserDrag: "none" }}>
       {data ? (
         <Widget
           data={data}

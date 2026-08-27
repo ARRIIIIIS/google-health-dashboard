@@ -24,6 +24,8 @@ use objc::runtime::{BOOL, Class, Object};
 use objc::{class, msg_send, sel, sel_impl};
 #[cfg(target_os = "macos")]
 use objc::{Encode, Encoding};
+#[cfg(target_os = "macos")]
+use tauri_plugin_liquid_glass::{GlassMaterialVariant, LiquidGlassConfig, LiquidGlassExt};
 
 // ── 设置 ─────────────────────────────────────────────────────────────────────
 #[derive(Serialize, Deserialize, Clone)]
@@ -984,6 +986,7 @@ fn set_position(app: AppHandle, _display_id: i32, x: i32, y: i32) -> Result<Stri
 
 fn main() {
     tauri::Builder::default()
+        .plugin(tauri_plugin_liquid_glass::init())
         .setup(|app| {
             // macOS：强制 Accessory 激活策略（不在 Dock 显示、不抢菜单栏/焦点）
             #[cfg(target_os = "macos")]
@@ -1029,9 +1032,30 @@ fn main() {
                     let style: u64 = msg_send![ns, styleMask];
                     let _: () = msg_send![ns, setStyleMask: style | 128u64];
                 }
-                // 系统原生液态玻璃：NSVisualEffectView(HudWindow 材质) + 36px 圆角，
-                // 替代 CSS backdrop-filter（透明窗口上采样不到桌面背景，磨砂是假的）
-                if let Err(e) = window_vibrancy::apply_vibrancy(
+                // 系统原生液态玻璃：macOS 26+ 走私有 NSGlassEffectView（真·液态玻璃，
+                // Widgets 小组件材质 + 36px 圆角），旧系统由插件自动回落 NSVisualEffectView；
+                // 再兜底一层：插件调用失败时手动回落 HudWindow 材质 vibrancy
+                let lg = app.handle().liquid_glass();
+                if lg.is_supported() {
+                    if let Err(e) = lg.set_effect(
+                        &win,
+                        LiquidGlassConfig {
+                            corner_radius: 36.0,
+                            variant: GlassMaterialVariant::Widgets,
+                            ..Default::default()
+                        },
+                    ) {
+                        eprintln!("[health] liquid glass failed: {:?}", e);
+                        if let Err(e2) = window_vibrancy::apply_vibrancy(
+                            &win,
+                            window_vibrancy::NSVisualEffectMaterial::HudWindow,
+                            Some(window_vibrancy::NSVisualEffectState::Active),
+                            Some(36.0),
+                        ) {
+                            eprintln!("[health] apply_vibrancy fallback failed: {:?}", e2);
+                        }
+                    }
+                } else if let Err(e) = window_vibrancy::apply_vibrancy(
                     &win,
                     window_vibrancy::NSVisualEffectMaterial::HudWindow,
                     Some(window_vibrancy::NSVisualEffectState::Active),
