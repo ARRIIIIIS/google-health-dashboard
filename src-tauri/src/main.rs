@@ -25,7 +25,8 @@ use objc::{class, msg_send, sel, sel_impl};
 #[cfg(target_os = "macos")]
 use objc::{Encode, Encoding};
 #[cfg(target_os = "macos")]
-use tauri_plugin_liquid_glass::{GlassMaterialVariant, LiquidGlassConfig, LiquidGlassExt};
+// liquid_glass 插件已弃用：NSGlassEffectView 边缘折射光晕在桌面小组件上不可控，
+// 改用 window_vibrancy（NSVisualEffectView HudWindow 材质），边缘干净。
 
 // ── 设置 ─────────────────────────────────────────────────────────────────────
 #[derive(Serialize, Deserialize, Clone)]
@@ -1042,7 +1043,7 @@ fn main() {
                 let _ = win.set_focus();
             }
         }))
-        .plugin(tauri_plugin_liquid_glass::init())
+        // liquid_glass 插件已弃用（见 import 注释）
         .setup(|app| {
             // macOS：强制 Accessory 激活策略（不在 Dock 显示、不抢菜单栏/焦点）
             #[cfg(target_os = "macos")]
@@ -1070,8 +1071,9 @@ fn main() {
             // macOS：桌面小组件窗口
             #[cfg(target_os = "macos")]
             if let Some(win) = app.get_webview_window("main") {
-                use objc::{msg_send, sel, sel_impl};
-                use objc::runtime::Object;
+                use cocoa::foundation::NSRect;
+                use objc::{class, msg_send, sel, sel_impl};
+                use objc::runtime::{Object, YES as YES_BOOL};
                 unsafe {
                     let ns = win.ns_window().expect("ns_window") as *mut Object;
                     // kCGDesktopIconWindowLevel(-2147483603) + 1
@@ -1087,41 +1089,35 @@ fn main() {
                     let _: () = msg_send![content_view, setWantsLayer: true];
                     let style: u64 = msg_send![ns, styleMask];
                     let _: () = msg_send![ns, setStyleMask: style | 128u64];
+
+                    // 系统原生磨砂玻璃：直接用 objc 建 NSVisualEffectView（绕过 window-vibrancy crate）
+                    // 原因 1：window-vibrancy 用 view.bounds() 创建，WKWebView 在 transparent 模式下初始为 0，
+                    //         vibrancy view 不自动撑大，露出下方 ~50px 灰色带（用户截图反馈"底部阴影"）
+                    // 原因 2：state 设 Active，点击小组件触发窗口激活后整个 vibrancy 变深（用户反馈"点击变黑"）
+                    // 解决：手动拿 contentView.frame 建 vibrancy view；state 锁定 Inactive 让小组件视觉稳定
+                    let frame: NSRect = msg_send![content_view, frame];
+                    // NSVisualEffectView
+                    let cls = class!(NSVisualEffectView);
+                    let vibrancy: *mut Object = msg_send![cls, alloc];
+                    let vibrancy: *mut Object = msg_send![vibrancy, initWithFrame: frame];
+                    // HudWindow material (10)
+                    let _: () = msg_send![vibrancy, setMaterial: 10i64];
+                    // BehindWindow blending mode (0)
+                    let _: () = msg_send![vibrancy, setBlendingMode: 0i64];
+                    // Inactive state (1) — 锁定浅色，窗口激活不切换
+                    let _: () = msg_send![vibrancy, setState: 1i64];
+                    // 36px 圆角
+                    let _: () = msg_send![vibrancy, setCornerRadius: 36.0f64];
+                    // WantsLayer
+                    let _: () = msg_send![vibrancy, setWantsLayer: YES_BOOL];
+                    // autoresizing: width+height sizable (18 = 2|16)
+                    let _: () = msg_send![vibrancy, setAutoresizingMask: 18u64];
+                    // 加到 contentView 下方（NSWindowBelow = -1）
+                    let null_obj: *mut Object = std::ptr::null_mut();
+                    let _: () = msg_send![content_view, addSubview: vibrancy positioned: -1i64 relativeTo: null_obj];
                 }
-                // 系统原生液态玻璃：macOS 26+ 走私有 NSGlassEffectView（真·液态玻璃，
-                // Widgets 小组件材质 + 36px 圆角），旧系统由插件自动回落 NSVisualEffectView；
-                // 再兜底一层：插件调用失败时手动回落 HudWindow 材质 vibrancy
-                let lg = app.handle().liquid_glass();
-                if lg.is_supported() {
-                    if let Err(e) = lg.set_effect(
-                        &win,
-                        LiquidGlassConfig {
-                            corner_radius: 36.0,
-                            variant: GlassMaterialVariant::Widgets,
-                            // alpha=0 透明 tint：去掉 NSGlassEffectView 默认浅白色 tint，
-                            // 否则玻璃会带一圈"白色外缘"看着像阴影
-                            tint_color: Some("#00000000".into()),
-                            ..Default::default()
-                        },
-                    ) {
-                        eprintln!("[health] liquid glass failed: {:?}", e);
-                        if let Err(e2) = window_vibrancy::apply_vibrancy(
-                            &win,
-                            window_vibrancy::NSVisualEffectMaterial::HudWindow,
-                            Some(window_vibrancy::NSVisualEffectState::Active),
-                            Some(36.0),
-                        ) {
-                            eprintln!("[health] apply_vibrancy fallback failed: {:?}", e2);
-                        }
-                    }
-                } else if let Err(e) = window_vibrancy::apply_vibrancy(
-                    &win,
-                    window_vibrancy::NSVisualEffectMaterial::HudWindow,
-                    Some(window_vibrancy::NSVisualEffectState::Active),
-                    Some(36.0),
-                ) {
-                    eprintln!("[health] apply_vibrancy failed: {:?}", e);
-                }
+                // vibrancy 挂载后再清理一次窗口阴影
+                disable_window_shadow(&win);
                 // vibrancy / 液态玻璃挂载后再清理一次阴影（递归关闭所有子视图 layer shadow）
                 disable_window_shadow(&win);
                 // 应用上次保存的位置

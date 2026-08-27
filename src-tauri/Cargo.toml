@@ -21,12 +21,13 @@ chrono = "0.4"
 libc = "0.2"
 
 # macOS 桌面层级窗口（贴桌面、不挡普通窗口）需要直接调 NSWindow；
-# window-vibrancy 提供系统原生 NSVisualEffectView 液态玻璃（真·毛玻璃，旧系统回落用）；
-# tauri-plugin-liquid-glass 在 macOS 26+ 走私有 NSGlassEffectView（真·液态玻璃），旧系统自动回落 vibrancy
+# window-vibrancy 提供系统原生 NSVisualEffectView 磨砂玻璃（HudWindow 材质，边缘干净无折射光晕）；
+# tauri-plugin-liquid-glass 已弃用：NSGlassEffectView 边缘折射光晕在桌面小组件上不可控
 [target.'cfg(target_os = "macos")'.dependencies]
 objc = "0.2"
 window-vibrancy = "0.6"
-tauri-plugin-liquid-glass = "0.1"
+# 提供 NSRect 等 Foundation/AppKit 类型，给手写 NSVisualEffectView 用
+cocoa = "0.26"
 
 [profile.release]
 opt-level = 2
