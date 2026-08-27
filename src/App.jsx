@@ -32,8 +32,9 @@ const C_DARK = {
   label: "rgba(255,255,255,0.95)",
   second: "rgba(250,250,252,0.86)",
   third: "rgba(245,245,250,0.66)",
-  // 半透明底色让系统 NSVisualEffectView 的模糊背景透出来（太浓会盖成纯黑，太透会偏色）
-  bg: "linear-gradient(160deg, rgba(52,52,56,0.58) 0%, rgba(30,30,34,0.52) 100%)",
+  // 半透明底色让系统 NSVisualEffectView 的模糊背景透出来（太浓会盖成纯黑，太透会偏色）。
+  // 浅色主题 0.74 → 0.22：之前太蒙（盖住系统玻璃），现在让系统模糊真正透出来
+  bg: "linear-gradient(160deg, rgba(52,52,56,0.42) 0%, rgba(30,30,34,0.36) 100%)",
   card: "rgba(255,255,255,0.07)",
   hairline: "rgba(255,255,255,0.08)",
   green: "#30D158",
@@ -48,9 +49,11 @@ const C_LIGHT = {
   label: "rgba(28,28,30,0.95)",
   second: "rgba(60,60,67,0.90)",
   third: "rgba(60,60,67,0.55)",
-  bg: "linear-gradient(160deg, rgba(255,255,255,0.74) 0%, rgba(245,245,247,0.58) 100%)",
-  card: "rgba(0,0,0,0.05)",
-  hairline: "rgba(0,0,0,0.10)",
+  // 系统 NSVisualEffectView 提供真实液态玻璃模糊，前端只叠极薄白色 tint 提亮。
+  // 0.74 太重盖住玻璃 → 0.22 透出系统模糊；卡片/分隔线在浅色下也减弱
+  bg: "linear-gradient(160deg, rgba(255,255,255,0.28) 0%, rgba(245,245,247,0.18) 100%)",
+  card: "rgba(0,0,0,0.03)",
+  hairline: "rgba(0,0,0,0.07)",
   green: "#248A3D",
   red: "#D70015",
   blue: "#007AFF",
