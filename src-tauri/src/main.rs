@@ -1098,6 +1098,9 @@ fn main() {
                         LiquidGlassConfig {
                             corner_radius: 36.0,
                             variant: GlassMaterialVariant::Widgets,
+                            // alpha=0 透明 tint：去掉 NSGlassEffectView 默认浅白色 tint，
+                            // 否则玻璃会带一圈"白色外缘"看着像阴影
+                            tint_color: Some("#00000000".into()),
                             ..Default::default()
                         },
                     ) {
