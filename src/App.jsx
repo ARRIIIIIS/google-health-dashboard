@@ -33,7 +33,7 @@ const C_DARK = {
   second: "rgba(250,250,252,0.86)",
   third: "rgba(245,245,250,0.66)",
   // 液态玻璃五层背景（自下而上）：渐变描边(border-box) → 玻璃主体(padding-box) → 左上主光源光晕 → 顶部高光带 → 底部收口
-  // 配合 border:1px solid transparent 使用；外投影由 C.panelShadow 承担
+  // 配合 border:1px solid transparent 使用。厚度感全部由内部光影承担（渐变描边+光晕+底部收口）
   bg: [
     "linear-gradient(0deg, rgba(0,0,0,0.28) 0%, rgba(0,0,0,0) 9%)",
     "linear-gradient(180deg, rgba(255,255,255,0.16) 0%, rgba(255,255,255,0) 12%)",
@@ -41,8 +41,7 @@ const C_DARK = {
     "linear-gradient(168deg, rgba(255,255,255,0.10) 0%, rgba(255,255,255,0.05) 42%, rgba(255,255,255,0.08) 100%) padding-box",
     "linear-gradient(168deg, rgba(255,255,255,0.45) 0%, rgba(255,255,255,0.18) 45%, rgba(0,0,0,0.20) 100%) border-box",
   ].join(", "),
-  // 外投影（悬浮厚度）。注意：固定尺寸透明窗口下超出窗口部分会被裁掉，厚度感主要由描边渐变与内部光影承担
-  panelShadow: "0 12px 30px rgba(0,0,0,0.35), 0 3px 10px rgba(0,0,0,0.22)",
+  // 不做外投影：固定尺寸透明窗口下 box-shadow 是矩形扩散，圆角外被窗口裁出直角阴影（用户否决）
   card: "rgba(255,255,255,0.05)",
   hairline: "rgba(255,255,255,0.08)",
   // 玻璃内容分区亮分隔线（metrics 列间 / 行间），浅色下用白亮线才有玻璃切面感
@@ -62,7 +61,7 @@ const C_LIGHT = {
   label: "rgba(28,28,30,0.95)",
   second: "rgba(60,60,67,0.90)",
   third: "rgba(60,60,67,0.55)",
-  // 液态玻璃五层背景（浅色版）：渐变描边 → 玻璃主体 → 光晕 → 高光带 → 底部收口
+  // 液态玻璃五层背景（浅色版）：渐变描边 → 玻璃主体 → 光晕 → 高光带 → 底部收口。无外投影（透明窗口裁直角）
   bg: [
     "linear-gradient(0deg, rgba(40,45,60,0.10) 0%, rgba(40,45,60,0) 9%)",
     "linear-gradient(180deg, rgba(255,255,255,0.50) 0%, rgba(255,255,255,0) 12%)",
@@ -70,7 +69,6 @@ const C_LIGHT = {
     "linear-gradient(168deg, rgba(255,255,255,0.38) 0%, rgba(255,255,255,0.20) 42%, rgba(255,255,255,0.30) 100%) padding-box",
     "linear-gradient(168deg, rgba(255,255,255,0.95) 0%, rgba(255,255,255,0.40) 45%, rgba(150,155,170,0.45) 100%) border-box",
   ].join(", "),
-  panelShadow: "0 12px 30px rgba(35,40,55,0.18), 0 3px 10px rgba(35,40,55,0.10)",
   card: "rgba(0,0,0,0.02)",
   hairline: "rgba(0,0,0,0.07)",
   divide: "rgba(255,255,255,0.45)",
@@ -202,7 +200,7 @@ function SettingsPanel({ draft, setDraft, onSave, onCancel, busy, rerender, syst
         padding: "12px 14px 16px", borderRadius: 28, WebkitClipPath: SQUIRCLE, clipPath: SQUIRCLE,
         background: C.bg,
         border: "1px solid transparent",
-        boxShadow: C.panelShadow + ", inset 0 1px 0 " + C.rim,
+        boxShadow: "inset 0 1px 0 " + C.rim,
         boxSizing: "border-box",
       }}
     >
@@ -478,9 +476,9 @@ function Widget({ data, settings, onRefresh, onReset, justResetAt, sedPopRef, dn
     // 与 Popover 磨砂叠加出真正的液态玻璃质感（不生效时也无害，磨砂仍由 vibrancy 提供）
     backdropFilter: "blur(18px) saturate(1.3)",
     WebkitBackdropFilter: "blur(18px) saturate(1.3)",
-    // 液态玻璃厚度：外投影悬浮 + 顶部一道亮棱（受光）。
-    // 不做四边 inset 棱线——左右侧棱会在圆角处与上下棱交叠出暗角（V1 教训）
-    boxShadow: C.panelShadow + ", inset 0 1px 0 " + C.rim,
+    // 液态玻璃厚度：全部由内部光影承担——顶部亮棱（受光）+ 渐变描边 + 底部收口。
+    // 不做外投影（透明窗口矩形裁剪出直角阴影），也不做四边 inset 棱线（圆角处交叠出暗角，V1 教训）
+    boxShadow: "inset 0 1px 0 " + C.rim,
     overflow: "hidden",
     position: "relative",
   };
