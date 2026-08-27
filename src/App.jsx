@@ -564,15 +564,24 @@ async function genAiTip(data, settings) {
       body: JSON.stringify({
         model: settings.llm_model || "deepseek-v4-flash",
         messages: [{ role: "system", content: sys }, { role: "user", content: user }],
-        temperature: 0.9, max_tokens: 128,
+        temperature: 0.9,
+        // 思考模型（如 glm-5.3）会先输出 reasoning 消耗 token：128 会被思考吃光导致 content 为空，
+        // 给到 1024 保证思考完还有余量输出正式回答
+        max_tokens: 1024,
       }),
       signal: ctl.signal,
     });
     clearTimeout(timer);
     if (!r.ok) return null;
     const j = await r.json();
-    const c = j.choices && j.choices[0] && j.choices[0].message && (j.choices[0].message.content || j.choices[0].message.reasoning_content);
-    return c ? c.trim() : null;
+    const msg = j.choices && j.choices[0] && j.choices[0].message;
+    let c = msg && msg.content;
+    // 思考模型 content 为空时兜底 reasoning_content，但仅当其含中文（英文思考过程不该展示给用户）
+    if (!c && msg && msg.reasoning_content && /[\u4e00-\u9fa5]/.test(msg.reasoning_content)) {
+      c = msg.reasoning_content;
+    }
+    // 剥掉模型偶尔输出的 markdown 加粗星号
+    return c ? c.trim().replace(/\*+/g, "").trim() : null;
   } catch (e) {
     return null;
   }
