@@ -371,10 +371,10 @@ def load_current_today():
 # ─── 久坐检测参数 ──────────────────────────────────────────────────────────────
 SEDENTARY_MIN = 45        # 连续不动超过此时长(分钟)则提醒（可被 --sed-min 覆盖）
 SEDENTARY_REMIND_MIN = 30 # 首次提醒后，每隔此时长复查提醒一次(分钟)（可被 --remind-min 覆盖）
-VERIFY_AFTER_MS = 3 * 60 * 1000  # 用户点击后 3 分钟核验步数
-STEP_DELTA    = 80        # 步数增加超过此值算"有活动"，重置基线
+STEP_DELTA    = 30        # 步数增加超过此值算"有活动"，重置久坐（80→30：短走也算活动）
 NOTIFY_START_HOUR = 10     # 仅在工作时段发通知(这台 Mac 10:00–19:00 使用)
 NOTIFY_END_HOUR   = 19
+USER_ACK_GRACE_MS = 3 * 60 * 1000  # 用户点"站起来了"后 3 分钟宽限，期间不重复弹
 
 # 久坐通知文案池（拟人化/风趣，每次随机抽一条，只提静坐时长）
 SEDENTARY_MSGS = [
@@ -442,79 +442,47 @@ def run_alerter_mode(idle_min):
 
 def apply_choice(choice):
     """
-    把用户选择（现在起来 / 稍后）写回 data.js。
-    两种选择统一行为：设置 3 分钟核验时间戳。
-    3 分钟后 check_sedentary 会对比步数是否增加，决定是否继续提醒。
+    用户点击「现在起来」或「稍后」后的处理。
+    不再立刻重置久坐状态——只记录 ack 时间，给 3 分钟宽限。
+    下次 check_sedentary 会对比步数：步数增加 → 自动重置；步数不变 → 宽限期过后继续提醒。
     """
     try:
         d = load_data_file()
         now = datetime.now()
         tid = d["today"]["date"]
-        verify_time = int(now.timestamp() * 1000) + VERIFY_AFTER_MS
-        steps_now = d["today"].get("steps", 0)
+        ack_time = int(time.time() * 1000)
 
         for h in d.get("history", []):
             if h.get("date") == tid:
-                h["verify_after_time"] = verify_time
-                h["verify_baseline_steps"] = steps_now
-                h["follow_up"] = True
-                h["snooze_until"] = 0
-                h["pending_notify"] = False
+                h["user_acked_time"] = ack_time
+                h["last_remind_time"] = ack_time
                 h["sedentary_notified"] = True
-                h["last_remind_time"] = int(time.time() * 1000)
                 break
 
-        d["today"]["verify_after_time"] = verify_time
-        d["today"]["verify_baseline_steps"] = steps_now
-        d["today"]["follow_up"] = True
-        d["today"]["snooze_until"] = 0
-        d["today"]["pending_notify"] = False
+        d["today"]["user_acked_time"] = ack_time
+        d["today"]["last_remind_time"] = ack_time
         d["today"]["sedentary_notified"] = True
-        d["today"]["last_remind_time"] = int(time.time() * 1000)
-        d["today"]["sedentary"] = True
         write_data(d)
-        log(f"  💬 用户点击「{choice}」，{VERIFY_AFTER_MS//60000}分钟后核验步数（基准={steps_now}）")
+        log(f"  💬 用户点击「{choice}」，3分钟宽限期内不重复弹（步数增加将自动解除久坐）")
     except Exception as e:
         log(f"  ⚠️ 选择状态更新失败: {e}")
 
 
 def check_sedentary(today_entry, steps, now):
     """
-    久坐检测 + 自适应提醒：
-    - 跟踪最近一次明显活动的时间，超过 SEDENTARY_MIN 未活动则标记久坐。
-    - 首次提醒后进入 follow_up（5 分钟复查）模式：服务器据此缩短采集间隔。
-    - 复查时若仍无变动 → 再次提醒（保持 5 分钟模式）；若有变动 → 退出 follow_up（恢复 10 分钟）。
-    - 「稍后」会把 snooze_until 设为未来时刻，期间不重复提醒，到期再评估。
-    - pending_notify 防止弹窗未关闭前被 5 分钟复查重复弹出。
-    - verify_after：用户点击后 3 分钟核验步数，未增加则继续提醒。
+    步数驱动的久坐检测（2026-08-27 重写）：
+    核心原则：步数是唯一的活动判据。步数增加 ≥ STEP_DELTA → 自动重置久坐。
+    ── 场景 1：步数增加（无论用户是否点击）→ 立即解除久坐
+    ── 场景 2：久坐提醒后用户点"站起来了"但步数未变 → 宽限期后继续提醒
+    ── 场景 3：久坐提醒后用户未操作、步数也未变 → 按 SEDENTARY_REMIND_MIN 间隔复查提醒
     返回 (sedentary, idle_min, reminded_this_run)
     """
     last_move_time = today_entry.get("last_move_time")
     last_steps_rec = today_entry.get("last_steps", 0)
-    follow_up = today_entry.get("follow_up", False)
-    verify_after_time = today_entry.get("verify_after_time", 0)
-    verify_baseline = today_entry.get("verify_baseline_steps", 0)
+    steps_at_sedentary = today_entry.get("steps_at_sedentary", 0)
+    user_acked_time = today_entry.get("user_acked_time", 0)
 
-    # ── 核验模式：3 分钟后对比步数 ──────────────────────────────
-    if verify_after_time and time.time() * 1000 >= verify_after_time:
-        today_entry["verify_after_time"] = 0   # 清除核验时间
-        if steps >= verify_baseline + STEP_DELTA:
-            # ✅ 步数真的增加了：更新活动基线，退出久坐
-            today_entry["last_move_time"] = now.strftime("%Y-%m-%d %H:%M:%S")
-            today_entry["last_steps"] = steps
-            today_entry["sedentary_notified"] = False
-            today_entry["follow_up"] = False
-            today_entry["snooze_until"] = 0
-            today_entry["pending_notify"] = False
-            log(f"  ✅ 核验通过：步数从 {verify_baseline} → {steps}，解除久坐提醒")
-            return False, 0, False
-        else:
-            # ❌ 步数未增加：重新触发提醒（视为 follow_up 继续）
-            log(f"  ❌ 核验失败：步数未增加（{verify_baseline} → {steps}），继续提醒")
-            today_entry["sedentary_notified"] = False   # 允许再次弹窗
-            follow_up = True
-
-    # 首次运行：初始化活动基线
+    # ── 首次运行：初始化活动基线 ──
     if not last_move_time:
         today_entry["last_move_time"] = now.strftime("%Y-%m-%d %H:%M:%S")
         today_entry["last_steps"] = steps
@@ -522,18 +490,24 @@ def check_sedentary(today_entry, steps, now):
         today_entry["follow_up"] = False
         today_entry["snooze_until"] = 0
         today_entry["pending_notify"] = False
-        today_entry["verify_after_time"] = 0
+        today_entry["steps_at_sedentary"] = 0
+        today_entry["user_acked_time"] = 0
         return False, 0, False
 
-    # 步数明显增加时，更新活动基线并清除 follow_up / snooze / pending
-    if steps >= last_steps_rec + STEP_DELTA:
+    # ── 步数增加 → 自动重置久坐（核心逻辑）──
+    # 对比两个基线：last_steps（上次活动时步数）和 steps_at_sedentary（久坐触发时步数）
+    # 任一基线步数增加 ≥ STEP_DELTA → 说明用户运动了，重置一切
+    baseline = max(last_steps_rec, steps_at_sedentary) if steps_at_sedentary else last_steps_rec
+    if steps >= baseline + STEP_DELTA:
         today_entry["last_move_time"] = now.strftime("%Y-%m-%d %H:%M:%S")
         today_entry["last_steps"] = steps
         today_entry["sedentary_notified"] = False
         today_entry["follow_up"] = False
         today_entry["snooze_until"] = 0
         today_entry["pending_notify"] = False
-        today_entry["verify_after_time"] = 0
+        today_entry["steps_at_sedentary"] = 0
+        today_entry["user_acked_time"] = 0
+        log(f"  ✅ 步数增加 {last_steps_rec}→{steps}（≥{STEP_DELTA}），自动解除久坐")
         return False, 0, False
 
     idle_min = int((now - datetime.strptime(last_move_time, "%Y-%m-%d %H:%M:%S")).total_seconds() // 60)
@@ -541,26 +515,36 @@ def check_sedentary(today_entry, steps, now):
         today_entry["follow_up"] = False
         today_entry["snooze_until"] = 0
         today_entry["pending_notify"] = False
-        today_entry["verify_after_time"] = 0
+        today_entry["steps_at_sedentary"] = 0
+        today_entry["user_acked_time"] = 0
         return False, idle_min, False
 
-    # 已达久坐阈值；先看「稍后」snooze 是否仍生效
-    snooze_until = today_entry.get("snooze_until", 0)
-    if snooze_until and time.time() * 1000 < snooze_until:
-        # 稍后模式生效中：暂不提醒，保持状态等 snooze 到期
+    # ── 已达久坐阈值 ──
+    # 记录久坐触发时的步数基线（用于后续步数对比）
+    if not steps_at_sedentary:
+        today_entry["steps_at_sedentary"] = steps
+        log(f"  📊 记录久坐基线步数: {steps}")
+
+    # 用户刚点过"站起来了"？3 分钟宽限期内不重复弹
+    now_ms = time.time() * 1000
+    if user_acked_time and now_ms - user_acked_time < USER_ACK_GRACE_MS:
         return True, idle_min, False
 
-    # 触发提醒（本周期首次 或 follow_up 复查，且弹窗未挂起）
+    # 宽限期已过，但步数没变 → 清除 ack 记录，允许再次提醒
+    if user_acked_time and now_ms - user_acked_time >= USER_ACK_GRACE_MS:
+        today_entry["user_acked_time"] = 0
+        today_entry["sedentary_notified"] = False  # 允许再次弹窗
+
+    # 触发提醒（首次 或 复查到期）
     in_window = NOTIFY_START_HOUR <= now.hour < NOTIFY_END_HOUR
     reminded = False
-    # 复查间隔：距上次提醒不足 SEDENTARY_REMIND_MIN 分钟不重复弹，防止 follow_up 每 5 分钟刷屏
     last_remind = today_entry.get("last_remind_time", 0)
-    remind_due = (time.time() * 1000 - last_remind) >= SEDENTARY_REMIND_MIN * 60 * 1000
-    if in_window and (not today_entry.get("sedentary_notified") or (follow_up and remind_due)) and not today_entry.get("pending_notify"):
+    remind_due = (now_ms - last_remind) >= SEDENTARY_REMIND_MIN * 60 * 1000
+    if in_window and (not today_entry.get("sedentary_notified") or remind_due) and not today_entry.get("pending_notify"):
         reminded = True
         today_entry["sedentary_notified"] = True
-        today_entry["last_remind_time"] = int(time.time() * 1000)
-    today_entry["follow_up"] = True   # 进入/保持 5 分钟复查模式
+        today_entry["last_remind_time"] = int(now_ms)
+    today_entry["follow_up"] = True
     return True, idle_min, reminded
 
 # 时段问候语（按 update_seq 轮换，避免每次同一句）
@@ -828,6 +812,8 @@ def main():
         "follow_up": today_entry.get("follow_up", False),
         "snooze_until": today_entry.get("snooze_until", 0),
         "pending_notify": today_entry.get("pending_notify", False),
+        "steps_at_sedentary": today_entry.get("steps_at_sedentary", 0),
+        "user_acked_time": today_entry.get("user_acked_time", 0),
     }
 
     # ── 防清零保护 ──

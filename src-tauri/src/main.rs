@@ -695,39 +695,29 @@ fn refresh_data(app: &AppHandle) {
 
 #[tauri::command]
 fn reset_sedentary(app: AppHandle) -> Result<(), String> {
+    // 用户点"站起来了"：不再立刻清零久坐状态，改为记录 ack 时间（3分钟宽限期）。
+    // 下次 Python check_sedentary 会对比步数：步数增加 → 自动重置；步数不变 → 宽限期后继续提醒。
     let (_, data, _, _) = paths(&app);
     let content = std::fs::read_to_string(&data).map_err(|e| e.to_string())?;
     let mut v: serde_json::Value = serde_json::from_str(&content).map_err(|e| e.to_string())?;
 
-    let now = chrono::Local::now().format("%Y-%m-%d %H:%M:%S").to_string();
+    let now_ms = chrono::Utc::now().timestamp_millis();
     let today = v["today"]["date"].as_str().unwrap_or("").to_string();
-    let steps = v["today"]["steps"].clone();
 
     if let Some(hist) = v.get_mut("history").and_then(|h| h.as_array_mut()) {
         for h in hist.iter_mut() {
             if h.get("date").and_then(|d| d.as_str()) == Some(today.as_str()) {
-                h["last_move_time"] = serde_json::Value::String(now.clone());
-                h["last_steps"] = steps.clone();
-                h["sedentary_notified"] = serde_json::Value::Bool(false);
-                h["follow_up"] = serde_json::Value::Bool(false);
-                h["pending_notify"] = serde_json::Value::Bool(false);
-                h["snooze_until"] = serde_json::Value::Number(0.into());
-                h["verify_after_time"] = serde_json::Value::Number(0.into());
-                h["verify_baseline_steps"] = steps.clone();
+                h["user_acked_time"] = serde_json::Value::Number(now_ms.into());
+                h["last_remind_time"] = serde_json::Value::Number(now_ms.into());
+                h["sedentary_notified"] = serde_json::Value::Bool(true);
             }
         }
     }
 
     if let Some(t) = v.get_mut("today") {
-        t["last_move_time"] = serde_json::Value::String(now.clone());
-        t["last_steps"] = steps.clone();
-        t["sedentary"] = serde_json::Value::Bool(false);
-        t["idle_min"] = serde_json::Value::Number(0.into());
-        t["pending_notify"] = serde_json::Value::Bool(false);
-        t["snooze_until"] = serde_json::Value::Number(0.into());
-        t["follow_up"] = serde_json::Value::Bool(false);
-        t["verify_after_time"] = serde_json::Value::Number(0.into());
-        t["verify_baseline_steps"] = steps.clone();
+        t["user_acked_time"] = serde_json::Value::Number(now_ms.into());
+        t["last_remind_time"] = serde_json::Value::Number(now_ms.into());
+        // 保持 sedentary/follow_up/idle_min 不变，等 Python 侧步数驱动决定
     }
 
     std::fs::write(&data, serde_json::to_string_pretty(&v).unwrap()).map_err(|e| e.to_string())
