@@ -294,8 +294,6 @@ function SettingsPanel({ draft, setDraft, onSave, onCancel, busy, rerender, syst
 // ── Widget（原 render 主体）─────────────────────────────────────────────────
 function Widget({ data, settings, onRefresh, onReset, justResetAt, sedPopRef, dndActive, bottomTip }) {
   const t = data.today || {};
-  // 只有配置了 LLM 才显示 tip：避免无 API 时露写死的固定文案
-  const hasLlm = !!(settings && settings.llm_base_url && settings.llm_api_key);
   const steps = t.steps || 0;
   const active = t.active_minutes || 0;
   const resting = t.resting_hr;
@@ -308,6 +306,7 @@ function Widget({ data, settings, onRefresh, onReset, justResetAt, sedPopRef, dn
   const distance = t.distance;
   const calories = t.calories;
   const sleep = t.sleep_asleep_min || 0;
+  const tip = t.tip;
   const level = t.tip_level || "good";
   const updated = t.updated_at;
   const sedentary = !!t.sedentary;
@@ -462,8 +461,8 @@ function Widget({ data, settings, onRefresh, onReset, justResetAt, sedPopRef, dn
     ];
     const sleepTotal = sleepStages.reduce(function (a, p) { return a + (p.v || 0); }, 0);
     const tipDot = level === "alert" ? C.alert : level === "warn" ? C.amber : C.green;
-    // 与旧 A 版行为统一：仅在配置了 LLM 时显示底部提示，避免露出写死固定文案
-    const tipText = hasLlm ? cleanTip(bottomTip) : null;
+    // AI tip 优先；AI 未配置 / 请求失败（如欠费、超时）时回落到数据里的规则 tip，保证底部提示始终可见
+    const tipText = cleanTip(bottomTip) || cleanTip(tip);
     const distStr = distance != null ? distance.toFixed(1) + "km" : "—";
     const calStr = calories != null ? calories + " " + T("kcal") : "";
     const midLine = T("stepsUnit") + " · " + T("distance") + " " + distStr + (calStr ? " · " + calStr : "");
