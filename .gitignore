@@ -5,3 +5,4 @@ src-tauri/gen/
 release/
 .DS_Store
 *.log
+vite.config.js.timestamp-*.mjs
