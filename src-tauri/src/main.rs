@@ -375,6 +375,31 @@ fn rebuild_tray_menu(app: &AppHandle) {
 #[cfg(not(target_os = "macos"))]
 fn rebuild_tray_menu(_app: &AppHandle) {}
 
+/// 关掉主窗口所有阴影（窗口级 + contentView layer shadow）。
+/// 递归遍历子视图在 objc 跨 FFI 边界容易触发 panic_cannot_unwind，故改用最小集：
+/// NSWindow 自身 setHasShadow(false) + contentView 自己的 layer shadowOpacity=0。
+/// NSVisualEffectView / NSGlassEffectView 由液态玻璃 / vibrancy 插件在内部管理其
+/// layer shadow 属性，这里只关它自己 layer 上的 shadow（如果有），
+/// 不递归到子层以避免跨 FFI 边界 panic。
+#[cfg(target_os = "macos")]
+fn disable_window_shadow(win: &tauri::WebviewWindow) {
+    use objc::{msg_send, sel, sel_impl};
+    if let Ok(ns) = win.ns_window() {
+        let ns = ns as *mut objc::runtime::Object;
+        unsafe {
+            let _: () = msg_send![ns, setHasShadow: false];
+            let cv: *mut objc::runtime::Object = msg_send![ns, contentView];
+            if !cv.is_null() {
+                let layer: *mut objc::runtime::Object = msg_send![cv, layer];
+                if !layer.is_null() {
+                    let _: () = msg_send![layer, setShadowOpacity: 0.0_f32];
+                    let _: () = msg_send![layer, setShadowRadius: 0.0_f32];
+                }
+            }
+        }
+    }
+}
+
 /// 根据 widget_visible 同步主窗口显隐；先 show 再定位，位置 clamp 到可见屏幕内。
 #[cfg(target_os = "macos")]
 fn sync_main_widget(app: &AppHandle, s: &Settings) {
@@ -390,9 +415,9 @@ fn sync_main_widget(app: &AppHandle, s: &Settings) {
                 if let Ok(ns) = win.ns_window() {
                     let ns = ns as *mut Object;
                     let _: () = msg_send![ns, setLevel: -2147483602i64];
-                    let _: () = msg_send![ns, setHasShadow: false];
                     let _: () = msg_send![ns, orderFrontRegardless];
                 }
+                disable_window_shadow(&win);
             }
             let (cx, cy) = clamp_to_screens(s.pos_x, s.pos_y, &collect_displays(), 344, 272);
             let _ = win.set_position(tauri::PhysicalPosition::new(cx, cy));
@@ -1105,11 +1130,8 @@ fn main() {
                 ) {
                     eprintln!("[health] apply_vibrancy failed: {:?}", e);
                 }
-                // 保险：vibrancy 挂载后再关一次窗口阴影，防止底部投影残留
-                unsafe {
-                    let ns = win.ns_window().expect("ns_window") as *mut Object;
-                    let _: () = msg_send![ns, setHasShadow: false];
-                }
+                // vibrancy / 液态玻璃挂载后再清理一次阴影（递归关闭所有子视图 layer shadow）
+                disable_window_shadow(&win);
                 // 应用上次保存的位置
                 let _ = win.set_position(tauri::PhysicalPosition::new(settings.pos_x, settings.pos_y));
 
