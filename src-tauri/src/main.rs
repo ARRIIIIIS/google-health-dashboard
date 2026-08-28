@@ -141,7 +141,6 @@ struct MenuStrings {
 }
 
 /// 菜单项句柄：运行时用 set_checked 做确定性单选（radio），不依赖重建时序
-#[cfg(target_os = "macos")]
 struct MenuItems {
     theme_auto: tauri::menu::CheckMenuItem<tauri::Wry>,
     theme_light: tauri::menu::CheckMenuItem<tauri::Wry>,
@@ -162,11 +161,9 @@ struct MenuItems {
     respect_dnd: tauri::menu::CheckMenuItem<tauri::Wry>,
 }
 
-#[cfg(target_os = "macos")]
 struct MenuItemsState(pub std::sync::Mutex<Option<MenuItems>>);
 
 /// 互斥组单选修正：把 on 项勾上、同组其它项取消勾
-#[cfg(target_os = "macos")]
 fn menu_radio(group: &str, on: &str, it: &MenuItems) {
     let set = |mi: &tauri::menu::CheckMenuItem<tauri::Wry>, want: bool| { let _ = mi.set_checked(want); };
     match group {
@@ -272,7 +269,6 @@ fn menu_strings(lang: &str) -> MenuStrings {
     }
 }
 
-#[cfg(target_os = "macos")]
 fn build_main_menu(app: &AppHandle, s: &Settings) -> tauri::menu::Menu<tauri::Wry> {
     use tauri::menu::{CheckMenuItem, IsMenuItem, Menu, MenuItem, PredefinedMenuItem, Submenu};
     let m = menu_strings(&s.language);
@@ -363,7 +359,6 @@ fn build_main_menu(app: &AppHandle, s: &Settings) -> tauri::menu::Menu<tauri::Wr
 
 /// 重建菜单栏菜单：文案跟随当前语言，勾选态跟随当前设置。
 /// 修复此前 emit("menu-rebuild") 无人消费导致菜单勾选态错乱的问题。
-#[cfg(target_os = "macos")]
 fn rebuild_tray_menu(app: &AppHandle) {
     let sh = app.state::<SettingsHandle>();
     let s = sh.clone_inner();
@@ -372,9 +367,6 @@ fn rebuild_tray_menu(app: &AppHandle) {
         let _ = tray.set_menu(Some(menu));
     }
 }
-
-#[cfg(not(target_os = "macos"))]
-fn rebuild_tray_menu(_app: &AppHandle) {}
 
 /// 关掉 NSWindow 系统阴影，保留液态玻璃/ vibrancy 的折射光晕。
 /// NSGlassEffectView / NSVisualEffectView 通过 layer.shadow* 实现折射/高光，
@@ -501,7 +493,12 @@ fn run_fetch_once(py: &Path, data: &Path, tok: &Path, cfg: &Path, sed_min: u64, 
     if let Some(parent) = data.parent() {
         let _ = std::fs::create_dir_all(parent);
     }
-    let status = Command::new("python3")
+    // Windows 上 Python 启动器命令为 python（python3 不存在），Linux/macOS 为 python3
+    #[cfg(target_os = "windows")]
+    let py_cmd = if std::process::Command::new("python").arg("--version").output().map(|o| o.status.success()).unwrap_or(false) { "python" } else { "py" };
+    #[cfg(not(target_os = "windows"))]
+    let py_cmd = "python3";
+    let status = Command::new(py_cmd)
         .arg(py)
         .arg("--once")
         .arg("--out")
@@ -615,8 +612,33 @@ fn is_dnd_active() -> bool {
     false
 }
 
-/// 登录项自启：通过 System Events 注册/取消（显示在系统设置 > 登录项）
+/// 登录项自启：macOS 通过 System Events（显示在系统设置 > 登录项）；
+/// Windows 通过注册表 HKCU\...\Run 键（显示在 任务管理器 > 启动应用）
 fn set_autostart(enabled: bool) -> std::io::Result<()> {
+    #[cfg(target_os = "windows")]
+    {
+        use winreg::enums::*;
+        use winreg::RegKey;
+        let hkcu = RegKey::predef(HKEY_CURRENT_USER);
+        let key = hkcu
+            .open_subkey_with_flags(r"Software\Microsoft\Windows\CurrentVersion\Run", KEY_SET_VALUE | KEY_READ)
+            .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e.to_string()))?;
+        if enabled {
+            // 当前 exe 路径写入 Run 键
+            let exe = std::env::current_exe()
+                .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e.to_string()))?;
+            key.set_value("HealthDashboard", &exe.to_string_lossy().to_string())
+                .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e.to_string()))?;
+            eprintln!("[health] autostart enabled via registry Run key");
+        } else {
+            let _ = key.delete_value("HealthDashboard");
+            eprintln!("[health] autostart removed from registry");
+        }
+        return Ok(());
+    }
+
+    #[cfg(target_os = "macos")]
+    {
     let app_path = "/Applications/Health Dashboard.app";
 
     // 先清理旧的 LaunchAgent plist（已废弃，改用 System Events）
@@ -661,6 +683,7 @@ end try"#;
     }
 
     Ok(())
+    }
 }
 
 // ── Tauri 命令 ────────────────────────────────────────────────────────────────
@@ -1180,13 +1203,24 @@ fn main() {
                 }
                 // vibrancy 挂载后再清理一次窗口阴影
                 disable_window_shadow(&win);
-                // vibrancy / 液态玻璃挂载后再清理一次阴影（递归关闭所有子视图 layer shadow）
-                disable_window_shadow(&win);
-                // 运行时显式把 WKWebView 背景设为全透明：仅靠 tauri.conf.json 的
-                // backgroundColor:#00000000 在部分 macOS/WKWebView 组合下不生效，
-                // underPageBackgroundColor 仍为白 → 盖住 vibrancy 磨砂（白底白条）
+            }
+
+            // Windows：Acrylic 磨砂 + 常驻桌面（Windows 没有 NSWindow 桌面层级 API，
+            // 用 always_on_bottom 模拟"贴桌面"效果）
+            #[cfg(target_os = "windows")]
+            if let Some(win) = app.get_webview_window("main") {
+                use window_vibrancy::apply_acrylic;
+                // Acrylic 效果：Win10 1803+ / Win11，rgba 为窗口基色（带透明度）
+                // 失败（如远程桌面/旧系统）则前端 CSS 半透明背景兜底
+                let _ = apply_acrylic(&win, Some((18, 18, 20, 125)));
+                // 贴桌面：始终置底
+                let _ = win.set_always_on_bottom(true);
+                // 显式透明背景，让 Acrylic 透出
                 let _ = win.set_background_color(Some(tauri::webview::Color(0, 0, 0, 0)));
-                // 应用上次保存的位置
+            }
+
+            // 跨平台：应用上次保存的位置
+            if let Some(win) = app.get_webview_window("main") {
                 let _ = win.set_position(tauri::PhysicalPosition::new(settings.pos_x, settings.pos_y));
 
                 // 拖拽移动后保存新位置（debounce 600ms，避免拖拽中频繁写盘；clamp 防止移出屏幕）
@@ -1209,8 +1243,7 @@ fn main() {
                 });
             }
 
-            // 菜单栏状态图标 + Clash 风格点击弹窗
-            #[cfg(target_os = "macos")]
+            // 菜单栏/系统托盘图标 + Clash 风格点击弹窗（macOS 菜单栏 / Windows 系统托盘）
             {
                 // [DEPRECATED] NSStatusBar 菜单栏图标已移除，改用下方的 Tauri TrayIcon API
                 // ── Tauri TrayIcon：精准捕获菜单栏图标点击 ──────────────
@@ -1269,7 +1302,12 @@ fn main() {
                             }
                             "open_data_folder" => {
                                 let dir = app.path().app_data_dir().unwrap_or_default();
+                                #[cfg(target_os = "macos")]
                                 let _ = std::process::Command::new("open").arg(&dir).spawn();
+                                #[cfg(target_os = "windows")]
+                                let _ = std::process::Command::new("explorer").arg(&dir).spawn();
+                                #[cfg(target_os = "linux")]
+                                let _ = std::process::Command::new("xdg-open").arg(&dir).spawn();
                             }
                             // ── 主题 ──
                             "theme_auto"  => { radio("theme", "theme_auto");  sh.set("theme", "auto");  s_changed = true; }

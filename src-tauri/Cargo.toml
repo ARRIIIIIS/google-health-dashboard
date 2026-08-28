@@ -29,5 +29,10 @@ window-vibrancy = "0.6"
 # 提供 NSRect 等 Foundation/AppKit 类型，给手写 NSVisualEffectView 用
 cocoa = "0.26"
 
+# Windows：Acrylic 磨砂窗口 + 注册表开机自启
+[target.'cfg(target_os = "windows")'.dependencies]
+window-vibrancy = "0.6"
+winreg = "0.52"
+
 [profile.release]
 opt-level = 2
