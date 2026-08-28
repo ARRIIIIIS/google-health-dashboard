@@ -554,26 +554,35 @@ async function genAiTip(data, settings) {
   const url  = base + "/chat/completions";
   const sys  = "你是一个亲近、理性的健康助理。仔细对比“今日”与“昨日”的数据，按以下规则输出：\n1. 一句中文，20字以内，不超过一行。\n2. 必须明确指出“今日”与“昨日”的区别（增多/减少/差不多）。\n3. 给出有针对性、可执行的建议（例：多走动、早睡、补水等）。\n4. 口吻亲切自然，像朋友提醒，不堆话、不用表情、不用专业术语。\n5. 重复多样性：同一数据多选一样句式不同。";
   const user = JSON.stringify(comparison) + "\n随机因子:" + Math.random();
+  const messages = [{ role: "system", content: sys }, { role: "user", content: user }];
   try {
-    // 15 秒超时：接口挂起时及时放弃，避免“正在分析…”永远不消失
-    const ctl = new AbortController();
-    const timer = setTimeout(() => ctl.abort(), 15000);
-    const r = await fetch(url, {
-      method: "POST",
-      headers: { "Content-Type": "application/json", Authorization: "Bearer " + settings.llm_api_key },
-      body: JSON.stringify({
+    let raw = null;
+    if (tauriAvailable()) {
+      // Tauri 环境走 Rust 代理：WKWebView 直接 fetch 会被 CORS 预检拦
+      // （方舟 coding 端点 allow-headers 不含 Authorization），后端 curl 无此限制
+      raw = await invoke("ai_chat", {
+        baseUrl: base,
+        apiKey: settings.llm_api_key,
         model: settings.llm_model || "deepseek-v4-flash",
-        messages: [{ role: "system", content: sys }, { role: "user", content: user }],
-        temperature: 0.9,
-        // 思考模型（如 glm-5.3）会先输出 reasoning 消耗 token：128 会被思考吃光导致 content 为空，
-        // 给到 1024 保证思考完还有余量输出正式回答
-        max_tokens: 1024,
-      }),
-      signal: ctl.signal,
-    });
-    clearTimeout(timer);
-    if (!r.ok) return null;
-    const j = await r.json();
+        messages: JSON.stringify(messages),
+        maxTokens: 1024,
+      });
+    } else {
+      // 浏览器 dev 兜底（无 CORS 代理，仅本地调试用）
+      // 15 秒超时：接口挂起时及时放弃，避免"正在分析…"永远不消失
+      const ctl = new AbortController();
+      const timer = setTimeout(() => ctl.abort(), 15000);
+      const r = await fetch(url, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Authorization: "Bearer " + settings.llm_api_key },
+        body: JSON.stringify({ model: settings.llm_model || "deepseek-v4-flash", messages, temperature: 0.9, max_tokens: 1024 }),
+        signal: ctl.signal,
+      });
+      clearTimeout(timer);
+      if (!r.ok) return null;
+      raw = await r.text();
+    }
+    const j = JSON.parse(raw);
     const msg = j.choices && j.choices[0] && j.choices[0].message;
     let c = msg && msg.content;
     // 思考模型 content 为空时兜底 reasoning_content，但仅当其含中文（英文思考过程不该展示给用户）
@@ -606,6 +615,8 @@ export default function App() {
 
   const aiBusyRef = useRef(false);
   const dataSigRef = useRef("");
+  const aiTipRef = useRef(null);      // AI tip 是否已产出（为空则轮询时定期重试）
+  const lastAiTryRef = useRef(0);     // 上次尝试时间，失败后退避 5 分钟再试
 
   const rerender = useCallback(() => forceTick((x) => x + 1), []);
   const applyTheme = useCallback(() => {
@@ -655,15 +666,17 @@ export default function App() {
         const dataChanged = sig !== dataSigRef.current;
         if (dataChanged) dataSigRef.current = sig;
         setData(parsed);
-        // 大模型底部提示：仅在数据有变化时重调，避免 5秒轮询反复刷新
+        // 大模型底部提示：数据有变化时重调；若还没有 AI tip（启动竞态漏掉/上次失败），退避 5 分钟后重试
         const s = settingsRef.current;
-        if (s && s.llm_base_url && s.llm_api_key && !aiBusyRef.current && dataChanged) {
+        const needRetry = !aiTipRef.current && (Date.now() - lastAiTryRef.current) > 300000;
+        if (s && s.llm_base_url && s.llm_api_key && !aiBusyRef.current && (dataChanged || needRetry)) {
           aiBusyRef.current = true;
+          lastAiTryRef.current = Date.now();
           setAiThinking(true);
           const tip = await genAiTip(parsed, s);
           aiBusyRef.current = false;
           setAiThinking(false);
-          if (tip) setAiTip(tip);
+          if (tip) { aiTipRef.current = tip; setAiTip(tip); }
         } else if (!s || !s.llm_base_url) {
           setAiThinking(false);
           setAiTip(null);
@@ -803,13 +816,15 @@ export default function App() {
             // 强制重置签名 + 重调 AI
             dataSigRef.current = "";
             aiBusyRef.current = true;
+            lastAiTryRef.current = Date.now();
             setAiThinking(true);
             const tip = await genAiTip(data, s);
             aiBusyRef.current = false;
             setAiThinking(false);
-            if (tip) setAiTip(tip);
+            if (tip) { aiTipRef.current = tip; setAiTip(tip); }
           } else if (!s.llm_base_url || !s.llm_api_key) {
             setAiThinking(false);
+            aiTipRef.current = null;
             setAiTip(null);
           }
         } catch (err) {}
@@ -819,8 +834,12 @@ export default function App() {
   }, [systemDark, rerender]);
 
   useEffect(() => {
-    loadSettings();
-    load();
+    // 关键：先等设置从磁盘读回（含 llm_base_url/key），再首次拉数据。
+    // 否则 load() 里 settingsRef 还是空，AI 调用被跳过且签名已消费，之后轮询永不再调（蓝点根因）
+    (async () => {
+      await loadSettings();
+      await load();
+    })();
     const id = setInterval(load, 5000); // 轻量轮询，数据变化即重渲染
     return () => clearInterval(id);
   }, [loadSettings, load]);

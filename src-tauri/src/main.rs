@@ -679,6 +679,54 @@ fn refresh_now(app: AppHandle) -> Result<(), String> {
     Ok(())
 }
 
+/// LLM 代理调用：WKWebView 里前端直接 fetch 外部 LLM 会被 CORS 预检拦截
+/// （如方舟 coding 端点的 allow-headers 不含 Authorization），改由 Rust 侧
+/// 用系统 curl 发请求，无 CORS 限制。messages 为 JSON 数组字符串。
+#[tauri::command]
+fn ai_chat(
+    base_url: String,
+    api_key: String,
+    model: String,
+    messages: String,
+    max_tokens: u32,
+) -> Result<String, String> {
+    let url = format!("{}/chat/completions", base_url.trim_end_matches('/'));
+    let msgs: serde_json::Value =
+        serde_json::from_str(&messages).map_err(|e| format!("messages JSON 无效: {}", e))?;
+    let body = serde_json::json!({
+        "model": model,
+        "messages": msgs,
+        "temperature": 0.9,
+        "max_tokens": if max_tokens > 0 { max_tokens } else { 1024 },
+    })
+    .to_string();
+
+    let out = std::process::Command::new("curl")
+        .arg("-s")
+        .arg("--max-time")
+        .arg("20")
+        .arg("-X")
+        .arg("POST")
+        .arg(&url)
+        .arg("-H")
+        .arg("Content-Type: application/json")
+        .arg("-H")
+        .arg(format!("Authorization: Bearer {}", api_key))
+        .arg("--data-binary")
+        .arg(&body)
+        .output()
+        .map_err(|e| format!("curl 启动失败: {}", e))?;
+
+    if !out.status.success() {
+        let code = out.status.code().unwrap_or(-1);
+        println!("[ai_chat] {} curl exit {} stderr={}", url, code, String::from_utf8_lossy(&out.stderr));
+        return Err(format!("curl exit {}", code));
+    }
+    let resp = String::from_utf8_lossy(&out.stdout).to_string();
+    println!("[ai_chat] {} -> {} bytes", url, resp.len());
+    Ok(resp)
+}
+
 /// 非阻塞刷新：后台线程跑 Python 采集，立即返回。
 fn refresh_data(app: &AppHandle) {
     let app = app.clone();
@@ -1332,6 +1380,7 @@ fn main() {
         .invoke_handler(tauri::generate_handler![
             read_data,
             refresh_now,
+            ai_chat,
             reset_sedentary,
             get_settings,
             save_settings,
