@@ -1,8 +1,8 @@
 {
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "default",
-  "description": "Capabilities for the main health dashboard window",
-  "windows": ["main"],
+  "description": "Capabilities for the main health dashboard window and sedentary popover window",
+  "windows": ["main", "sed-pop"],
   "permissions": [
     "core:default",
     "core:event:allow-listen",

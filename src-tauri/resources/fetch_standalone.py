@@ -57,6 +57,52 @@ def load_data_file():
     except Exception:
         return {"today": {}, "history": []}
 
+def get_7day_averages(history, today_date):
+    """
+    计算过去7天（不含今日）的指标平均值。
+    预期 history 包含 snapshot。通过获取每天最后的 snapshot 来代表当日总量。
+    """
+    target_dates = []
+    try:
+        today_dt = datetime.strptime(today_date, "%Y-%m-%d")
+    except:
+        return {}
+
+    for i in range(1, 8):
+        target_dates.append((today_dt - timedelta(days=i)).strftime("%Y-%m-%d"))
+    
+    # 分组：date -> [entries]
+    date_groups = {}
+    for entry in history:
+        d = entry.get("date")
+        if d in target_dates:
+            if d not in date_groups:
+                date_groups[d] = []
+            date_groups[d].append(entry)
+            
+    metrics_to_avg = ["steps", "sleep_asleep_min", "hrv", "resting_hr", "spo2", "resp"]
+    stats = {m: [] for m in metrics_to_avg}
+    
+    for d in target_dates:
+        entries = date_groups.get(d, [])
+        if not entries:
+            continue
+        # 最后一个 entry 代表该日最新的状态/总量
+        latest = entries[-1]
+        for m in metrics_to_avg:
+            val = latest.get(m)
+            if val is not None and isinstance(val, (int, float)):
+                stats[m].append(val)
+                
+    averages = {}
+    for m in metrics_to_avg:
+        vals = stats[m]
+        if vals:
+            averages[m] = round(sum(vals) / len(vals), 2)
+        else:
+            averages[m] = None
+    return averages
+
 # ─── Token 管理 ────────────────────────────────────────────────────────────────
 
 def load_token():
@@ -368,6 +414,41 @@ def load_current_today():
     """读取当前 today 数据（供防清零保护对比）"""
     return load_data_file().get("today", {})
 
+
+# App / Rust / 前端把以下交互字段写在【顶层 today】上；
+# 而 check_sedentary 只读写 history 列表里的今日条目 (today_entry)。
+# 采集器每轮用 today_data（来自 history 条目）整文件覆盖写盘，
+# 若这些字段只存在于顶层 today（如 remind_event 由前端/脚本直接写入），
+# 下一轮采集就会把它们清零，导致久坐提醒在真实场景下几乎不触发。
+# 因此写盘前必须把顶层旧值作为兜底合并进来。
+APP_FIELDS = {
+    "follow_up": False,
+    "snooze_until": 0,
+    "pending_notify": False,
+    "steps_at_sedentary": 0,
+    "user_acked_time": 0,
+    "remind_event": 0,
+    "sedentary_notified": False,
+    "last_remind_time": 0,
+    "last_move_time": "",
+    "last_steps": 0,
+}
+
+def preserve_app_fields(today_entry, prev_today):
+    """
+    合并 App 托管的交互字段。
+    优先取本次 check_sedentary 计算出的 today_entry 值（采集器权威），
+    否则回退到顶层 today 的旧值（App/Rust/前端写入的），
+    再否则用默认值。这样顶层 today 上的 remind_event 等不会被采集覆盖清零。
+    """
+    out = {}
+    for f, default in APP_FIELDS.items():
+        v = today_entry.get(f, None)
+        if v is None:
+            v = prev_today.get(f, None)
+        out[f] = default if v is None else v
+    return out
+
 # ─── 久坐检测参数 ──────────────────────────────────────────────────────────────
 SEDENTARY_MIN = 45        # 连续不动超过此时长(分钟)则提醒（可被 --sed-min 覆盖）
 SEDENTARY_REMIND_MIN = 30 # 首次提醒后，每隔此时长复查提醒一次(分钟)（可被 --remind-min 覆盖）
@@ -468,7 +549,7 @@ def apply_choice(choice):
         log(f"  ⚠️ 选择状态更新失败: {e}")
 
 
-def check_sedentary(today_entry, steps, now):
+def check_sedentary(today_entry, prev_today, steps, now):
     """
     步数驱动的久坐检测（2026-08-27 v2：点"站起来了"立刻重置，说谎则回滚）：
     核心原则：步数是唯一的活动判据。步数增加 ≥ STEP_DELTA → 确认活动。
@@ -477,13 +558,24 @@ def check_sedentary(today_entry, steps, now):
               步数增加 → 确认解除；步数未变 → 回滚到原始 idle 时间并继续累计
     ── 场景 3：久坐提醒后用户未操作、步数也未变 → 按 SEDENTARY_REMIND_MIN 间隔复查提醒
     返回 (sedentary, idle_min, reminded_this_run)
+
+    基线字段优先从【顶层 today】(prev_today, App/Rust/前端写入的权威实时态) 取，
+    history 条目(today_entry)缺失时才回退——避免 App 直接写在顶层 today 的状态被忽略。
     """
-    last_move_time = today_entry.get("last_move_time")
-    last_steps_rec = today_entry.get("last_steps", 0)
-    steps_at_sedentary = today_entry.get("steps_at_sedentary", 0)
-    user_acked_time = today_entry.get("user_acked_time", 0)
-    steps_at_ack = today_entry.get("steps_at_ack", 0)
-    last_move_time_before_ack = today_entry.get("last_move_time_before_ack", "")
+    def _pick(key, default):
+        # 顶层 today 是 App/Rust/前端写入的权威实时态，优先；
+        # history 条目仅作趋势备份，缺字段时回退。
+        v = (prev_today or {}).get(key, None)
+        if v is None:
+            v = today_entry.get(key, None)
+        return default if v is None else v
+
+    last_move_time = _pick("last_move_time", None)
+    last_steps_rec = _pick("last_steps", 0)
+    steps_at_sedentary = _pick("steps_at_sedentary", 0)
+    user_acked_time = _pick("user_acked_time", 0)
+    steps_at_ack = _pick("steps_at_ack", 0)
+    last_move_time_before_ack = _pick("last_move_time_before_ack", "")
 
     # ── 首次运行：初始化活动基线 ──
     if not last_move_time:
@@ -493,6 +585,7 @@ def check_sedentary(today_entry, steps, now):
         today_entry["follow_up"] = False
         today_entry["snooze_until"] = 0
         today_entry["pending_notify"] = False
+        today_entry["remind_event"] = 0
         today_entry["steps_at_sedentary"] = 0
         today_entry["user_acked_time"] = 0
         today_entry["steps_at_ack"] = 0
@@ -510,6 +603,7 @@ def check_sedentary(today_entry, steps, now):
             today_entry["follow_up"] = False
             today_entry["snooze_until"] = 0
             today_entry["pending_notify"] = False
+            today_entry["remind_event"] = 0
             today_entry["steps_at_sedentary"] = 0
             today_entry["user_acked_time"] = 0
             today_entry["steps_at_ack"] = 0
@@ -538,6 +632,7 @@ def check_sedentary(today_entry, steps, now):
         today_entry["follow_up"] = False
         today_entry["snooze_until"] = 0
         today_entry["pending_notify"] = False
+        today_entry["remind_event"] = 0
         today_entry["steps_at_sedentary"] = 0
         today_entry["user_acked_time"] = 0
         today_entry["steps_at_ack"] = 0
@@ -552,6 +647,7 @@ def check_sedentary(today_entry, steps, now):
         today_entry["follow_up"] = False
         today_entry["snooze_until"] = 0
         today_entry["pending_notify"] = False
+        today_entry["remind_event"] = 0
         today_entry["steps_at_sedentary"] = 0
         today_entry["user_acked_time"] = 0
         today_entry["steps_at_ack"] = 0
@@ -576,6 +672,8 @@ def check_sedentary(today_entry, steps, now):
         reminded = True
         today_entry["sedentary_notified"] = True
         today_entry["last_remind_time"] = int(now_ms)
+        # 提醒事件时间戳：Tauri 前端检测到它变化 → 调 Rust 弹系统通知（菜单栏 app 身份）
+        today_entry["remind_event"] = int(now_ms)
     today_entry["follow_up"] = True
     return True, idle_min, reminded
 
@@ -782,22 +880,53 @@ def main():
 
     # ── 历史记录（用于变化对比）──
     history = load_history()
+    now_dt = datetime.now()
+    now_str = now_dt.strftime("%Y-%m-%d %H:%M:%S")
+    now_time_str = now_dt.strftime("%H:%M")
+    today = now_dt.strftime("%Y-%m-%d")
+    
+    # 1. 寻找或创建“今日”汇总条目（用于 Widget 展示与防清零保护）
     today_entry = next((h for h in history if h.get("date") == today), None)
     if today_entry:
         today_entry["update_count"] = today_entry.get("update_count", 0) + 1
     else:
         today_entry = {"date": today, "update_count": 0}
         history.append(today_entry)
-    # 只保留最近 7 天
-    history = [h for h in history if h.get("date")][-7:]
+
+    # 顶层 today 是 App/Rust/前端写入的权威实时态（remind_event、sedentary 等）。
+    # check_sedentary 只从 history 条目读基线，会忽略顶层写入；这里读出来作为兜底。
+    prev_today = load_current_today()
+
+    # 2. 生成当前状态快照（用于时间序列对比）
+    snapshot = {
+        "date": today,
+        "time": now_time_str,
+        "steps": steps,
+        "active_minutes": azm[0] + azm[1] + azm[2],
+        "sleep_asleep_min": (sleep["total"] - sleep["awake"]) if sleep else 0,
+        "resting_hr": resting_hr,
+        "hrv": hrv,
+        "spo2": spo2,
+        "resp": resp,
+        "timestamp": int(time.time() * 1000)
+    }
+    history.append(snapshot)
+
+    # 3. 修剪历史记录（保留最近 500 个快照，防止文件无限增长）
+    history = history[-500:]
+    
+    # 4. 提取对比基线（用于 Python 端日志记录）
     update_seq = today_entry["update_count"]
     yesterday = next((h for h in reversed(history) if h.get("date") != today), None)
     if yesterday:
-        log(f"  昨日对比: steps={yesterday.get('steps')} sleep={yesterday.get('sleep_asleep_min')} hrv={yesterday.get('hrv')}")
+        log(f"  昨日/最近一次对比: steps={yesterday.get('steps')} time={yesterday.get('time')}")
+    
+    rolling_averages = get_7day_averages(history, today)
+    if rolling_averages:
+        log(f"  7日均值: {rolling_averages}")
 
-    # ── 久坐检测：写 idle_min/sedentary 到 data.js，由 widget 渲染胶囊+弹窗。
-    # 注意：已彻底禁用 macOS 系统通知横幅（不再调用 send_notification）。
-    sedentary, idle_min, reminded = check_sedentary(today_entry, steps, datetime.now())
+    # ── 久坐检测 ──
+    sedentary, idle_min, reminded = check_sedentary(today_entry, prev_today, steps, datetime.now())
     log(f"  久坐: {'是' if sedentary else '否'} (idle={idle_min}min)")
 
     # 生成提示
@@ -811,7 +940,8 @@ def main():
     )
     log(f"  tip: {tip} [{tip_level}] (seq={update_seq})")
 
-    # 写入 data.json（Tauri Rust 后端读取纯 JSON 格式）
+    # 写入 data.json
+    # prev_today 已在上面读取（check_sedentary 之前），作为 App 托管交互字段的兜底来源
     today_data = {
         "date":      today,
         "updated_at": datetime.now().strftime("%H:%M"),
@@ -821,15 +951,13 @@ def main():
         "azm_fat":   azm[0],
         "azm_card":  azm[1],
         "azm_peak":  azm[2],
-        # Widget 期望的字段名（兼容）
-        "active_minutes": azm[0] + azm[1] + azm[2],   # 总活动分钟
+        "active_minutes": azm[0] + azm[1] + azm[2],
         "resting_hr": resting_hr,
-        "heart_rate":      heart_rate,        # 实时心率（最新样本 bpm）
-        "heart_rate_time": heart_rate_time,   # 采样时间 "HH:MM"
+        "heart_rate":      heart_rate,
+        "heart_rate_time": heart_rate_time,
         "hrv":       hrv,
         "spo2":      spo2,
         "respiratory_rate": resp,
-        # Widget 期望的睡眠字段名
         "sleep_asleep_min": (sleep["total"] - sleep["awake"]) if sleep else 0,
         "sleep_awake_min":  sleep["awake"]    if sleep else 0,
         "sleep_light_min":  sleep["light"]    if sleep else 0,
@@ -841,11 +969,9 @@ def main():
         "tip_level": tip_level,
         "sedentary": sedentary,
         "idle_min": idle_min,
-        "follow_up": today_entry.get("follow_up", False),
-        "snooze_until": today_entry.get("snooze_until", 0),
-        "pending_notify": today_entry.get("pending_notify", False),
-        "steps_at_sedentary": today_entry.get("steps_at_sedentary", 0),
-        "user_acked_time": today_entry.get("user_acked_time", 0),
+        # ── App 托管交互字段：采集器不权威，优先保留旧值，避免覆盖清零 ──
+        **preserve_app_fields(today_entry, prev_today),
+        "rolling_averages": rolling_averages,
     }
 
     # ── 防清零保护 ──

@@ -19,6 +19,8 @@ serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 chrono = "0.4"
 libc = "0.2"
+# 久坐提醒弹窗：以本 app（菜单栏 Health Dashboard）身份发 macOS 系统通知
+tauri-plugin-notification = "2"
 
 # macOS 桌面层级窗口（贴桌面、不挡普通窗口）需要直接调 NSWindow；
 # window-vibrancy 提供系统原生 NSVisualEffectView 磨砂玻璃（HudWindow 材质，边缘干净无折射光晕）；

@@ -27,6 +27,10 @@ const DICT = {
     noData: "暂无数据",
     settings: "设置",
     settingsTitle: "设置",
+    testLlm: "测试 LLM API",
+    testLlmOk: "API 正常 · {ms}ms",
+    testLlmFail: "API 异常：{e}",
+    testLlmTesting: "测试中…",
     language: "语言",
     theme: "外观",
     themeAuto: "跟随系统",
@@ -49,6 +53,7 @@ const DICT = {
     cancel: "取消",
     aiThinking: "正在分析今日状态…",
     aboutLlm: "填写后底部提示由大模型实时生成，每次不同；留空则使用固定提示。",
+    configMissing: "配置缺失",
   },
   en: {
     appTitle: "Health",
@@ -76,6 +81,10 @@ const DICT = {
     noData: "No data",
     settings: "Settings",
     settingsTitle: "Settings",
+    testLlm: "Test LLM API",
+    testLlmOk: "API OK · {ms}ms",
+    testLlmFail: "API error: {e}",
+    testLlmTesting: "Testing…",
     language: "Language",
     theme: "Appearance",
     themeAuto: "Follow System",
@@ -98,6 +107,7 @@ const DICT = {
     cancel: "Cancel",
     aiThinking: "Analyzing today…",
     aboutLlm: "If set, the bottom tip is generated live by the LLM and varies each time; otherwise the fixed tip is used.",
+    configMissing: "Missing configuration",
   },
   ja: {
     appTitle: "健康",
@@ -147,6 +157,7 @@ const DICT = {
     cancel: "キャンセル",
     aiThinking: "今日の状態を分析中…",
     aboutLlm: "設定すると、下のヒントは LLM が毎回異なる内容で生成します。空なら固定ヒントを使用。",
+    configMissing: "設定不足",
   },
 };
 

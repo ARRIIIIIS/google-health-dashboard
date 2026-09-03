@@ -69,6 +69,23 @@ const C_LIGHT = {
   amber: "#B25000",
   alert: "#D70015",
 };
+// 本地提示兜底池：LLM 未配置 / 失败时启用（蓝点），按分钟轮换保证「久不更新」也能变
+const SEDENTARY_TIPS = [
+  "久坐伤身，起身走走更健康。",
+  "站起来伸个懒腰，感觉会更好。",
+  "久坐提醒：起来接杯水吧。",
+  "离开椅子活动两分钟，腰背会感谢你。",
+];
+const FALLBACK_TIPS = [
+  "喝杯水，活动一下筋骨吧。",
+  "深呼吸，放松一下肩膀。",
+  "休息一会，眼睛看向远方。",
+  "保持节奏，劳逸结合。",
+  "今天的目标很接近了，加油！",
+  "保持好心情，状态会更好。",
+  "适当补水，身体更轻松。",
+  "午后容易困，动一动提提神。",
+];
 // 当前生效调色板（随系统/设置切换）
 let C = C_DARK;
 
@@ -143,12 +160,13 @@ function cleanTip(s) {
   if (!s) return "";
   return s
     .replace(/[🀀-🿿﻿‍]/gu, "")
-    .replace(/\s{2,}/g, " ")
+    .replace(/[，。、；：！？“”‘’（）《》【】…—～,.;:!?()\[\]"'`\-]/g, "")
+    .replace(/\s+/g, "")
     .trim();
 }
 
 // ── Settings panel（覆盖在小组件之上的滚动设置层）────────────────────────────
-function SettingsPanel({ draft, setDraft, onSave, onCancel, busy, rerender, systemDark }) {
+function SettingsPanel({ draft, setDraft, onSave, onCancel, busy, rerender, systemDark, onTestApi, testStatus }) {
   const set = (k, v) => setDraft((d) => ({ ...d, [k]: v }));
   const guideCard = { background: "rgba(128,128,128,0.08)", border: "1px solid " + C.hairline, borderRadius: 12, padding: "9px 11px", marginTop: 6 };
   const guideBtn = { display: "inline-block", marginTop: 7, fontSize: 10, fontWeight: 600, color: "#fff", background: C.blue, padding: "5px 11px", borderRadius: 8, cursor: "pointer" };
@@ -194,7 +212,7 @@ function SettingsPanel({ draft, setDraft, onSave, onCancel, busy, rerender, syst
         <div style={{ fontSize: 11, fontWeight: 700, color: C.amber, marginBottom: 7 }}>
           {ICO.chair}{" 久坐提醒"}
         </div>
-        <label style={sedLabel}>{T("sedThreshold")}</label>
+        <label style={sedLabel}>{T("sedentaryThreshold")}</label>
         <div style={{ display: "flex", gap: 5, flexWrap: "wrap" }}>
           {[30, 40, 45, 60, 90].map((m) => (
             <div key={m} onClick={() => set("sedentary_min", m)}
@@ -230,7 +248,6 @@ function SettingsPanel({ draft, setDraft, onSave, onCancel, busy, rerender, syst
         {[["auto", T("themeAuto")], ["light", T("themeLight")], ["dark", T("themeDark")]].map(([v, lbl]) => (
           <div key={v} onClick={() => {
             set("theme", v);
-            // 主题立即生效
             const dark = v === "dark" ? true : v === "light" ? false : systemDark;
             C = dark ? C_DARK : C_LIGHT;
             rerender();
@@ -290,29 +307,51 @@ function SettingsPanel({ draft, setDraft, onSave, onCancel, busy, rerender, syst
 
       {/* ── Google 健康（浏览器引导）── */}
       <div style={guideCard}>
-        <div style={{ fontSize: 11, fontWeight: 700, color: C.label }}>Google 健康数据</div>
-        <div style={{ fontSize: 9.5, color: C.third, marginTop: 3, lineHeight: 1.35 }}>需在浏览器中完成 Google 授权（OAuth）。点击按钮在默认浏览器打开设置向导。</div>
-        <div onClick={() => openExternal(GOOGLE_SETUP_URL)} style={guideBtn}>在浏览器中设置 →</div>
-      </div>
+        <div style={{ fontSize: 11, fontWeight: 700, color: C.label }}>Google 健康数据</div >
+        <div style={{ fontSize: 9.5, color: C.third, marginTop: 3, lineHeight: 1.35 }}>需在浏览器中完成 Google 授权（OAuth）。点击按钮在默认浏览器打开设置向导。</div >
+        <div onClick={() => openExternal(GOOGLE_SETUP_URL)} style={guideBtn}>在浏览器中设置 →</div >
+      </div >
 
       {/* ── AI 模型（浏览器引导）── */}
       <div style={guideCard}>
-        <div style={{ fontSize: 11, fontWeight: 700, color: C.label }}>AI 提示语</div>
-        <div style={{ fontSize: 9.5, color: C.third, marginTop: 3, lineHeight: 1.35 }}>在浏览器中配置大模型（Base URL / API Key / 模型）。点击按钮打开配置页。</div>
-        <div onClick={() => openExternal(AI_SETUP_URL)} style={guideBtn}>在浏览器中设置 →</div>
+        <div style={{ fontSize: 11, fontWeight: 700, color: C.label }}>AI 提示语</div >
+        <div style={{ fontSize: 9.5, color: C.third, marginTop: 3, lineHeight: 1.35 }}>在浏览器中配置大模型（Base URL / API Key / 模型）。点击按钮打开配置页。</div >
+        <div onClick={() => openExternal(AI_SETUP_URL)} style={guideBtn}>在浏览器中设置 →</div >
+      </div >
+
+      {/* ── LLM API 测试 ── */}
+      <div style={guideCard}>
+        <div style={{ fontSize: 11, fontWeight: 700, color: C.label }}>LLM API 连通性测试</div >
+        <div style={{ fontSize: 9.5, color: C.third, marginTop: 3, lineHeight: 1.35 }}>测试 API 是否正常工作及端点延迟。</div >
+        <div onClick={onTestApi} style={{ ...guideBtn, background: testStatus?.status === "testing" ? C.amber : (testStatus?.status === "ok" ? C.green : C.blue) }}>
+          {testStatus?.status === "testing" ? "测试中..." : (testStatus?.status === "ok" ? "测试成功" : "开始测试")}
+        </div >
+        {testStatus && <div style={{ fontSize: 8, color: C.second, marginTop: 4 }}>{testStatus.message}</div >}
+      </div >
+
+      {/* ── 表情跟随鼠标 ── */}
+      <div style={guideCard}>
+        <div style={{ fontSize: 11, fontWeight: 700, color: C.label }}>表情跟随鼠标</div>
+        <div style={{ fontSize: 9.5, color: C.third, marginTop: 3, lineHeight: 1.35 }}>鼠标划过小组件时，表情会看向它。阈值越小越克制，满偏距离越小越灵敏。</div>
+        <label style={{ ...labelStyle, marginTop: 8, fontVariantNumeric: "tabular-nums" }}>跟随阈值 {((draft.gaze_threshold != null ? draft.gaze_threshold : 1.0)).toFixed(2)}</label>
+        <input type="range" min="0.2" max="1" step="0.05" value={draft.gaze_threshold != null ? draft.gaze_threshold : 1.0}
+          onChange={(e) => set("gaze_threshold", parseFloat(e.target.value))}
+          style={{ width: "100%", accentColor: C.blue, marginTop: 4, cursor: "pointer" }} />
+        <label style={{ ...labelStyle, marginTop: 8, fontVariantNumeric: "tabular-nums" }}>满偏距离 {Math.round(draft.gaze_radius != null ? draft.gaze_radius : 80)} px</label>
+        <input type="range" min="60" max="360" step="10" value={draft.gaze_radius != null ? draft.gaze_radius : 80}
+          onChange={(e) => set("gaze_radius", parseFloat(e.target.value))}
+          style={{ width: "100%", accentColor: C.blue, marginTop: 4, cursor: "pointer" }} />
       </div>
 
-      {/* 保存 / 取消 */}
-      <div style={{ display: "flex", gap: 8, marginTop: 14 }}>
-        <div onClick={onCancel} style={{ flex: 1, textAlign: "center", fontSize: 11, fontWeight: 600, color: C.second, border: "1px solid " + C.hairline, padding: "7px 0", borderRadius: 9, cursor: "pointer" }}>{T("cancel")}</div>
-        <div onClick={busy ? undefined : onSave} style={{ flex: 1, textAlign: "center", fontSize: 11, fontWeight: 700, color: "#fff", background: C.blue, padding: "7px 0", borderRadius: 9, cursor: busy ? "default" : "pointer", opacity: busy ? 0.6 : 1 }}>{T("save")}</div>
-      </div>
-    </div>
-  );
+    {/* 保存 / 取け */}
+    <div style={{ display: "flex", gap: 8, marginTop: 14 }}>
+      <div onClick={onCancel} style={{ flex: 1, textAlign: "center", fontSize: 11, fontWeight: 600, color: C.second, border: "1px solid " + C.hairline, padding: "7px 0", borderRadius: 9, cursor: "pointer" }}>{T("cancel")}</div >
+      <div onClick={busy ? undefined : onSave} style={{ flex: 1, textAlign: "center", fontSize: 11, fontWeight: 700, color: "#fff", background: C.blue, padding: "7px 0", borderRadius: 9, cursor: busy ? "default" : "pointer", opacity: busy ? 0.6 : 1 }}>{T("save")}</div >
+    </div >
+  </div >
+);
 }
-
-// ── Widget（原 render 主体）─────────────────────────────────────────────────
-function Widget({ data, settings, onRefresh, onReset, justResetAt, sedPopRef, dndActive, bottomTip }) {
+function Widget({ data, settings, onRefresh, onReset, justResetAt, sedPopRef, dndActive, bottomTip, forceWidgetPop, setForceWidgetPop }) {
   const t = data.today || {};
   const steps = t.steps || 0;
   const active = t.active_minutes || 0;
@@ -326,7 +365,6 @@ function Widget({ data, settings, onRefresh, onReset, justResetAt, sedPopRef, dn
   const distance = t.distance;
   const calories = t.calories;
   const sleep = t.sleep_asleep_min || 0;
-  const tip = t.tip;
   const updated = t.updated_at;
   const sedentary = !!t.sedentary;
   const idleMin = t.idle_min != null ? t.idle_min : null;
@@ -373,6 +411,28 @@ function Widget({ data, settings, onRefresh, onReset, justResetAt, sedPopRef, dn
             w.document.addEventListener("click", function () {
               try { w.__cycleEmotion(); } catch (e) {}
             });
+            // 表情跟随鼠标：鼠标在窗口内移动时眼睛看过去，移出窗口缓缓回正；
+            // 阈值/距离优先读设置（gaze_threshold/gaze_radius），缺省回退 1.0/80（更灵敏）
+            const clampN = function (v, a, b) { return v < a ? a : (v > b ? b : v); };
+            const onMove = function (e) {
+              try {
+                const s = settingsRef.current;
+                const R = (s && s.gaze_radius) ? s.gaze_radius : 80;
+                const TH = (s && s.gaze_threshold) ? s.gaze_threshold : 1.0;
+                const rect = el.getBoundingClientRect();
+                const cx = rect.left + rect.width / 2;
+                const cy = rect.top + rect.height / 2;
+                let nx = clampN((e.clientX - cx) / R, -1, 1);
+                let ny = clampN((e.clientY - cy) / R, -1, 1);
+                nx = clampN(nx, -TH, TH);
+                ny = clampN(ny, -TH, TH);
+                w.__ball.setGaze(nx, ny);
+              } catch (err) {}
+            };
+            const onLeave = function () { try { w.__ball.clearGaze(); } catch (err) {} };
+            window.addEventListener("mousemove", onMove);
+            document.addEventListener("mouseleave", onLeave);
+            window.addEventListener("blur", onLeave);
           } catch (e) {}
         };
         setup();
@@ -388,17 +448,26 @@ function Widget({ data, settings, onRefresh, onReset, justResetAt, sedPopRef, dn
     popDismissed = !!(rec && rec.date === t.date && rec.idle === idleMin);
   } catch (e) {}
   const dndBlock = settings.respect_dnd && dndActive;
-  const showSedPop = effSed && effIdle != null && !popDismissed && !dndBlock;
+  const showSedPop = (effSed || forceWidgetPop) && effIdle != null && !popDismissed && !dndBlock;
 
   const dismissSedPop = function () {
     try { localStorage.setItem(SED_POP_KEY, JSON.stringify({ date: t.date, idle: idleMin })); } catch (e) {}
+    setForceWidgetPop(false);
   };
 
   const ballWrap = (
     <div data-tauri-drag-region="false" style={{ position: "relative", width: 52, height: 52, flexShrink: 0, zIndex: 10 }}>
       {ballIframe}
+    </div>
+  );
+
+  const idleChipWithPop = effIdle != null ? (
+    <div style={{ position: "relative" }}>
+      <div data-tauri-drag-region="false" title={T("sedentaryThreshold")} onMouseDown={function (e) { e.preventDefault(); e.stopPropagation(); if (!effSed || !sedPopRef.current) return; const vis = sedPopRef.current.style.display !== "none"; sedPopRef.current.style.display = vis ? "none" : "block"; if (vis) dismissSedPop(); else { try { localStorage.removeItem(SED_POP_KEY); } catch (err) {} } }} style={{ display: "flex", alignItems: "center", gap: 5, height: 19, padding: "0 8px 0 6px", borderRadius: 99, flexShrink: 0, fontSize: 9, fontWeight: 600, letterSpacing: 0.2, fontVariantNumeric: "tabular-nums", cursor: effSed ? "pointer" : "default", ...(effSed ? { background: "rgba(255,159,10,0.16)", color: C.amber, animation: "sed-pulse 2.2s ease-in-out infinite" } : { background: C.card, color: C.third }) }}>
+        {ICO.chair}<span>{effIdle} min</span>
+      </div>
       {effSed && effIdle != null && (
-        <div ref={function (el) { sedPopRef.current = el; }} style={{ position: "absolute", top: "calc(100% + 8px)", left: "50%", marginLeft: -93, width: 186, zIndex: 50, borderRadius: 12, padding: "9px 11px 8px", background: "rgba(38,30,18,0.92)", backdropFilter: "blur(20px)", WebkitBackdropFilter: "blur(20px)", border: "1px solid rgba(255,159,10,0.45)", boxShadow: "0 12px 32px rgba(0,0,0,0.55), 0 0 24px rgba(255,159,10,0.10)", display: showSedPop ? "block" : "none", animation: "sed-pop .4s cubic-bezier(.2,.9,.3,1.15)" }}>
+        <div ref={function (el) { sedPopRef.current = el; }} style={{ position: "absolute", top: "calc(100% + 8px)", left: "50%", marginLeft: -93, width: 186, zIndex: 50, borderRadius: 12, padding: "9px 11px 8px", background: "rgba(38,30,18,0.92)", backdropFilter: "blur(20px)", WebkitBackdropFilter: "blur(20px)", border: "1px solid rgba(255,159,10,0.45)", display: showSedPop ? "block" : "none", animation: "sed-pop .4s cubic-bezier(.2,.9,.3,1.15)" }}>
           <div style={{ position: "absolute", top: -4.5, left: "50%", marginLeft: -4.5, width: 9, height: 9, background: "rgba(38,30,18,0.92)", borderLeft: "1px solid rgba(255,159,10,0.45)", borderTop: "1px solid rgba(255,159,10,0.45)", transform: "rotate(45deg)" }} />
           <div style={{ fontSize: 10.5, fontWeight: 700, color: C.amber, letterSpacing: 0.2, display: "flex", alignItems: "center", gap: 5 }}>
             {ICO.chair}<span>{T("sedentaryMin", { m: idleMin })}</span>
@@ -410,12 +479,6 @@ function Widget({ data, settings, onRefresh, onReset, justResetAt, sedPopRef, dn
           </div>
         </div>
       )}
-    </div>
-  );
-
-  const idleChip = effIdle != null ? (
-    <div data-tauri-drag-region="false" title={effSed ? "久坐中 · 点击开/关提醒" : "静坐计时"} onMouseDown={function (e) { e.preventDefault(); if (!effSed || !sedPopRef.current) return; const vis = sedPopRef.current.style.display !== "none"; sedPopRef.current.style.display = vis ? "none" : "block"; if (vis) dismissSedPop(); else { try { localStorage.removeItem(SED_POP_KEY); } catch (err) {} } }} style={{ display: "flex", alignItems: "center", gap: 5, height: 19, padding: "0 8px 0 6px", borderRadius: 99, flexShrink: 0, fontSize: 9, fontWeight: 600, letterSpacing: 0.2, fontVariantNumeric: "tabular-nums", cursor: effSed ? "pointer" : "default", ...(effSed ? { background: "rgba(255,159,10,0.16)", color: C.amber, animation: "sed-pulse 2.2s ease-in-out infinite" } : { background: C.card, color: C.third }) }}>
-      {ICO.chair}<span>{effIdle} min</span>
     </div>
   ) : null;
 
@@ -431,7 +494,7 @@ function Widget({ data, settings, onRefresh, onReset, justResetAt, sedPopRef, dn
       <span style={{ fontSize: 11, fontWeight: 700, color: C.label, letterSpacing: 0.1 }}>{T("appTitle")}</span>
       <div style={{ flex: 1 }} />
       {ballWrap}
-      {idleChip}
+      {idleChipWithPop}
       <span style={{ fontSize: 9, fontWeight: 500, color: C.third, fontVariantNumeric: "tabular-nums" }}>{updated || fmtTime(now)}</span>
       {/* 设置入口已移至菜单栏 */}
       <div data-tauri-drag-region="false" className="hd-refresh-btn" onMouseDown={function (e) { e.preventDefault(); e.stopPropagation(); if (e.button !== 0) return; onRefresh(); }} title={T("refreshTitle")} style={{ width: 19, height: 19, borderRadius: "50%", background: "rgba(255,255,255,0.08)", display: "flex", alignItems: "center", justifyContent: "center", cursor: "pointer", flexShrink: 0, color: C.second }}>
@@ -479,10 +542,13 @@ function Widget({ data, settings, onRefresh, onReset, justResetAt, sedPopRef, dn
       { k: "deep", v: t.sleep_deep_min || 0, c: C.indigo },
     ];
     const sleepTotal = sleepStages.reduce(function (a, p) { return a + (p.v || 0); }, 0);
-    // 圆点指示提示来源：绿色 = LLM 生效（AI tip / 正在分析），蓝色 = LLM 未配置或失败、回落到本地规则提示
+    // 圆点指示提示来源：绿色 = LLM 生效（AI tip / 正在分析），蓝色 = LLM 未配置或失败、回落到本地静态提示池
     const tipDot = bottomTip ? C.green : C.blue;
-    // AI tip 优先；AI 未配置 / 请求失败（如欠费、超时）时回落到数据里的规则 tip，保证底部提示始终可见
-    const tipText = cleanTip(bottomTip) || cleanTip(tip);
+    // AI tip 优先；AI 未配置 / 请求失败时回落到本地静态池：按分钟轮换（久坐场景优先久坐提醒），
+    // 保证提示始终可见且会更新，不再依赖数据里的旧规则 tip（数据不动它就不动的根因）
+    const fallbackPool = effSed ? SEDENTARY_TIPS : FALLBACK_TIPS;
+    const fallbackTip = fallbackPool[Math.floor(Date.now() / 60000) % fallbackPool.length];
+    const tipText = cleanTip(bottomTip) || fallbackTip;
     const distStr = distance != null ? distance.toFixed(1) + "km" : "—";
     const calStr = calories != null ? calories + " " + T("kcal") : "";
     const midLine = T("stepsUnit") + " · " + T("distance") + " " + distStr + (calStr ? " · " + calStr : "");
@@ -540,42 +606,107 @@ function tauriAvailable() {
 }
 
 // 大模型实时底部提示
-async function genAiTip(data, settings) {
+async function genAiTip(data, settings, rolling_averages) {
   if (!settings.llm_base_url || !settings.llm_api_key) return null;
   const td = data && data.today ? data.today : {};
   const hist = (data && Array.isArray(data.history)) ? data.history : [];
-  const yd  = hist[0] || {}; // 昨日
-  // 今日 vs 昨日，null/undefined 当不存在
-  const g = (v) => (v === null || v === undefined) ? null : v;
-  const today_  = { steps: g(td.steps), active: g(td.active_minutes), sleep: g(td.sleep_asleep_min), resting_hr: g(td.resting_hr), hrv: g(td.hrv), spo2: g(td.spo2) };
-  const yd_    = { steps: g(yd.steps),  active: g(yd.active_minutes),  sleep: g(yd.sleep_asleep_min),  resting_hr: g(yd.resting_hr),  hrv: g(yd.hrv),  spo2: g(yd.spo2)  };
-  const comparison = { 今日: today_, 昨日: yd_ };
+  
+  // --- 极致优化：同比匹配算法 (Sameday Matching) ---
+  // 目标：在历史中寻找与当前时间最接近的“昨日同期”快照，并处理可能的跨天边界情况。
+  let yd = null;
+  if (hist.length > 0) {
+    const now = new Date();
+    const now_minutes = now.getHours() * 60 + now.getMinutes();
+    let minDiff = Infinity;
+
+    // 遍历历史记录（排除今天）
+    for (const h of hist) {
+      if (h.date === td.date) continue;
+
+      const h_time = h.time || "00:00";
+      const [h_h, h_m] = h_time.split(":").map(Number);
+      const h_minutes = h_h * 60 + h_m;
+
+      // 计算绝对分钟差（处理半夜跨天逻辑：例如 00:10 与 23:50 的差值是 20 分钟）
+      let diff = Math.abs(now_minutes - h_minutes);
+      if (diff > 720) diff = 1440 - diff; // 考虑 24 小时循环
+
+      // 如果在 30 分钟窗口内，且是目前找到的最接近的
+      if (diff <= 30 && diff < minDiff) {
+        minDiff = diff;
+        yd = h;
+      }
+    }
+  }
+
+  // --- 构造强类型的对比对象 ---
+  // 确保缺失的数据明确为 null，防止 AI 在面对 {} 时产生幻觉
+  const g = (v) => (v === null || v === undefined ? null : v);
+  
+  const today_ = { 
+    steps: g(td.steps), 
+    active: g(td.active_minutes), 
+    sleep: g(td.sleep_asleep_min), 
+    resting_hr: g(td.resting_hr), 
+    hrv: g(td.hrv), 
+    spo2: g(td.spo2) 
+  };
+  
+  const yd_ = yd ? { 
+    steps: g(yd.steps),  
+    active: g(yd.active_minutes),  
+    sleep: g(yd.sleep_asleep_min),  
+    resting_hr: g(yd.resting_hr),  
+    hrv: g(yd.hrv),  
+    spo2: g(yd.spo2)  
+  } : null; // 如果没找到同期数据，设为 null
+
+  const comparison = { 
+    今日: today_, 
+    昨日同期: yd_, // 可能是 null
+    七日平均: rolling_averages 
+  };
+
   const base = settings.llm_base_url.replace(/\/+$/, "");
   const url  = base + "/chat/completions";
-  const sys  = "你是一个亲近、理性的健康助理。仔细对比“今日”与“昨日”的数据，按以下规则输出：\n1. 一句中文，20字以内，不超过一行。\n2. 必须明确指出“今日”与“昨日”的区别（增多/减少/差不多）。\n3. 给出有针对性、可执行的建议（例：多走动、早睡、补水等）。\n4. 口吻亲切自然，像朋友提醒，不堆话、不用表情、不用专业术语。\n5. 重复多样性：同一数据多选一样句式不同。";
+  // 方舟 coding 端点不认 "auto"，UI 若选 auto 需兜底到具体模型，否则 404
+  const model = (settings.llm_model && settings.llm_model !== "auto")
+    ? settings.llm_model : "deepseek-v4-flash";
+  
+  // --- 重构 System Prompt：引入逻辑优先级与防御性规则 ---
+  const sys  =`你是一个亲近、理性的健康助理。我会为你提供“今日”数据、“昨日同期”数据（可能为null）以及“七日平均值”。
+
+请遵循以下逻辑规则进行深度观察：
+1. **优先级**：今日数据 > 昨日同期 > 七日平均。
+2. **对比逻辑**：
+   - 若“昨日同期”存在：请对比今日与昨日的差异（增多/减少/持平），并结合“七日平均值”判断当前状态是处于“常规水平”还是“异常波动”。
+   - 若“昨日同期”为null：**严禁**进行数值对比！请仅根据“今日”与“七日平均值”的关系，判断今日是“高于平均”还是“低于平均”。
+3. **输出规范**：
+   - 20字以内的中文，不含任何标点符号（句号、逗号、叹号等一律不要）。
+   - 必须明确趋势（增多/减少/差不多）。
+   - 口吻亲切自然，像朋友提醒。
+   - 禁止表情符号、专业术语与冗余解释。`;
+
   const user = JSON.stringify(comparison) + "\n随机因子:" + Math.random();
   const messages = [{ role: "system", content: sys }, { role: "user", content: user }];
+
   try {
     let raw = null;
     if (tauriAvailable()) {
-      // Tauri 环境走 Rust 代理：WKWebView 直接 fetch 会被 CORS 预检拦
-      // （方舟 coding 端点 allow-headers 不含 Authorization），后端 curl 无此限制
       raw = await invoke("ai_chat", {
         baseUrl: base,
         apiKey: settings.llm_api_key,
-        model: settings.llm_model || "deepseek-v4-flash",
+        model: model,
         messages: JSON.stringify(messages),
         maxTokens: 1024,
       });
     } else {
-      // 浏览器 dev 兜底（无 CORS 代理，仅本地调试用）
-      // 15 秒超时：接口挂起时及时放弃，避免"正在分析…"永远不消失
       const ctl = new AbortController();
       const timer = setTimeout(() => ctl.abort(), 15000);
       const r = await fetch(url, {
         method: "POST",
         headers: { "Content-Type": "application/json", Authorization: "Bearer " + settings.llm_api_key },
-        body: JSON.stringify({ model: settings.llm_model || "deepseek-v4-flash", messages, temperature: 0.9, max_tokens: 1024 }),
+        body: JSON.stringify({ model, messages, temperature: 0.9, max_tokens: 1024 }),
         signal: ctl.signal,
       });
       clearTimeout(timer);
@@ -585,17 +716,14 @@ async function genAiTip(data, settings) {
     const j = JSON.parse(raw);
     const msg = j.choices && j.choices[0] && j.choices[0].message;
     let c = msg && msg.content;
-    // 思考模型 content 为空时兜底 reasoning_content，但仅当其含中文（英文思考过程不该展示给用户）
     if (!c && msg && msg.reasoning_content && /[\u4e00-\u9fa5]/.test(msg.reasoning_content)) {
       c = msg.reasoning_content;
     }
-    // 剥掉模型偶尔输出的 markdown 加粗星号
     return c ? c.trim().replace(/\*+/g, "").trim() : null;
   } catch (e) {
     return null;
   }
 }
-
 export default function App() {
   const [data, setData] = useState(null);
   const [justResetAt, setJustResetAt] = useState(0);
@@ -604,10 +732,12 @@ export default function App() {
   const [draft, setDraft] = useState(null);
 
   const [dndActive, setDndActive] = useState(false);
+  const [forceWidgetPop, setForceWidgetPop] = useState(false);
   const [aiTip, setAiTip] = useState(null);
   const [aiThinking, setAiThinking] = useState(false);
   const [saveBusy, setSaveBusy] = useState(false);
   const [systemDark, setSystemDark] = useState(true);
+  const [testAiStatus, setTestAiStatus] = useState(null); // { status: 'idle'|'testing'|'ok'|'error', message: string }
   const [, forceTick] = useState(0);
 
   const sedPopRef = useRef(null);
@@ -617,6 +747,10 @@ export default function App() {
   const dataSigRef = useRef("");
   const aiTipRef = useRef(null);      // AI tip 是否已产出（为空则轮询时定期重试）
   const lastAiTryRef = useRef(0);     // 上次尝试时间，失败后退避 5 分钟再试
+  const forceAiRefreshRef = useRef(false); // 手动刷新时置位，强制重调一次 AI tip
+  // 久坐提醒事件去重：记录已处理（或启动时已存在）的 remind_event 时间戳。
+  // 初值 null：首次 load 只记录不弹（避免 app 启动时把历史提醒再弹一遍）
+  const lastRemindRef = useRef(null);
 
   const rerender = useCallback(() => forceTick((x) => x + 1), []);
   const applyTheme = useCallback(() => {
@@ -625,6 +759,29 @@ export default function App() {
     C = dark ? C_DARK : C_LIGHT;
     rerender();
   }, [systemDark, rerender]);
+
+  const handleTestApi = useCallback(async () => {
+    const s = settingsRef.current;
+    if (!s?.llm_base_url || !s?.llm_api_key) {
+      setTestAiStatus({ status: 'error', message: T("configMissing") });
+      return;
+    }
+    setTestAiStatus({ status: 'testing', message: T("testLlmTesting") });
+    const start = Date.now();
+    try {
+      const res = await invoke("ai_chat", {
+        baseUrl: s.llm_base_url,
+        apiKey: s.llm_api_key,
+        model: s.llm_model || "deepseek-v4-flash",
+        messages: JSON.stringify([{ role: "user", content: "hi" }]),
+        maxTokens: 10,
+      });
+      const latency = Date.now() - start;
+      setTestAiStatus({ status: 'ok', message: T("testLlmOk", { ms: latency }) });
+    } catch (e) {
+      setTestAiStatus({ status: 'error', message: T("testLlmFail", { e: e.message || "unknown" }) });
+    }
+  }, []);
 
   // 加载设置 + 应用语言/主题
   const loadSettings = useCallback(async () => {
@@ -666,16 +823,21 @@ export default function App() {
         const dataChanged = sig !== dataSigRef.current;
         if (dataChanged) dataSigRef.current = sig;
         setData(parsed);
-        // 大模型底部提示：数据有变化时重调；若还没有 AI tip（启动竞态漏掉/上次失败），退避 5 分钟后重试
+        // 大模型底部提示：数据有变化时重调（跟随最新数据）；手动点刷新按钮时
+        // 强制重调一次（forceAiRefreshRef 在 onRefresh 置位，消费后清除）。
+        // 已有可见提示时后台静默刷新（不闪「正在分析…」），仅首次/无提示时才显示思考态。
         const s = settingsRef.current;
-        const needRetry = !aiTipRef.current && (Date.now() - lastAiTryRef.current) > 300000;
-        if (s && s.llm_base_url && s.llm_api_key && !aiBusyRef.current && (dataChanged || needRetry)) {
+        const now = Date.now();
+        const forceAi = !!forceAiRefreshRef.current;
+        forceAiRefreshRef.current = false; // 消费掉本次强制刷新标记
+        if (s && s.llm_base_url && s.llm_api_key && !aiBusyRef.current && (dataChanged || forceAi)) {
           aiBusyRef.current = true;
-          lastAiTryRef.current = Date.now();
-          setAiThinking(true);
-          const tip = await genAiTip(parsed, s);
+          lastAiTryRef.current = now;
+          const silent = !!aiTipRef.current;
+          if (!silent) setAiThinking(true);
+          const tip = await genAiTip(parsed, s, parsed.rolling_averages);
           aiBusyRef.current = false;
-          setAiThinking(false);
+          if (!silent) setAiThinking(false);
           if (tip) { aiTipRef.current = tip; setAiTip(tip); }
         } else if (!s || !s.llm_base_url) {
           setAiThinking(false);
@@ -687,6 +849,21 @@ export default function App() {
         } else {
           setDndActive(false);
         }
+        // 久坐提醒弹窗：Python 触发提醒时会在 data.json 写 remind_event（ms 时间戳），
+        // 检测到新事件 → 在菜单栏图标下方弹出提醒面板（样式/文案与小组件弹窗一致）；
+        // 勿扰模式下只亮小组件不弹
+        const remindEvent = today.remind_event || 0;
+        if (remindEvent > 0 && remindEvent !== lastRemindRef.current) {
+          lastRemindRef.current = remindEvent;
+          if (tauriAvailable()) {
+            setForceWidgetPop(true);
+            let dnd = false;
+            if (s && s.respect_dnd) { try { dnd = await invoke("is_dnd_active"); } catch (e) {} }
+            if (!dnd) {
+              try { await invoke("show_sed_popover"); } catch (e) {}
+            }
+          }
+        }
       }
     } catch (e) {
       console.warn("load failed", e);
@@ -695,6 +872,7 @@ export default function App() {
 
   const onRefresh = useCallback(async () => {
     document.body.classList.add("hd-refreshing");
+    forceAiRefreshRef.current = true; // 手动刷新强制重调 AI tip（每次点刷新都出新提示）
     // 记住当前数据签名，等 Python 采集真正写完（数据变化）再读新数据
     const beforeSig = data && data.today
       ? [data.today.steps, data.today.distance, data.today.calories, data.today.updated_at].join("|")
@@ -818,7 +996,7 @@ export default function App() {
             aiBusyRef.current = true;
             lastAiTryRef.current = Date.now();
             setAiThinking(true);
-            const tip = await genAiTip(data, s);
+            const tip = await genAiTip(data, s, data.rolling_averages);
             aiBusyRef.current = false;
             setAiThinking(false);
             if (tip) { aiTipRef.current = tip; setAiTip(tip); }
@@ -858,6 +1036,8 @@ export default function App() {
           sedPopRef={sedPopRef}
           dndActive={dndActive}
           bottomTip={bottomTip}
+          forceWidgetPop={forceWidgetPop}
+          setForceWidgetPop={setForceWidgetPop}
         />
       ) : (
         <div style={{ width: "100%", height: "100%", display: "flex", alignItems: "center", justifyContent: "center", color: "rgba(255,255,255,0.5)", fontSize: 12 }}>
@@ -865,7 +1045,7 @@ export default function App() {
         </div>
       )}
       {settingsOpen && draft && (
-        <SettingsPanel
+                <SettingsPanel
           draft={draft}
           setDraft={setDraft}
           onSave={onSave}
@@ -873,6 +1053,8 @@ export default function App() {
           busy={saveBusy}
           rerender={rerender}
           systemDark={systemDark}
+          onTestApi={handleTestApi}
+          testStatus={testAiStatus}
         />
       )}
     </div>

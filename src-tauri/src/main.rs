@@ -49,6 +49,10 @@ struct Settings {
     llm_base_url: String,
     llm_api_key: String,
     llm_model: String,
+    #[serde(default = "default_gaze_threshold")]
+    gaze_threshold: f64,
+    #[serde(default = "default_gaze_radius")]
+    gaze_radius: f64,
 }
 
 impl Default for Settings {
@@ -71,9 +75,15 @@ impl Default for Settings {
             llm_base_url: String::new(),
             llm_api_key: String::new(),
             llm_model: String::new(),
+            // gaze 跟随更灵敏：阈值 1.0（满偏）+ 满偏距离 80px（更小=鼠标更近就到满偏）
+            gaze_threshold: 1.0,
+            gaze_radius: 80.0,
         }
     }
 }
+
+fn default_gaze_threshold() -> f64 { 1.0 }
+fn default_gaze_radius() -> f64 { 80.0 }
 
 const SETTINGS_FILE: &str = "settings.json";
 
@@ -137,6 +147,7 @@ struct MenuStrings {
     refresh_now: String,
     open_folder: String,
     setup_wizard: String,
+    restart: String,
     quit: String,
 }
 
@@ -218,6 +229,7 @@ fn menu_strings(lang: &str) -> MenuStrings {
             refresh_now: "Refresh Now".into(),
             open_folder: "Open Data Folder".into(),
             setup_wizard: "Settings…".into(),
+            restart: "Restart".into(),
             quit: "Quit".into(),
         },
         "ja" => MenuStrings {
@@ -241,14 +253,15 @@ fn menu_strings(lang: &str) -> MenuStrings {
             refresh_now: "今すぐ更新".into(),
             open_folder: "データフォルダを開く".into(),
             setup_wizard: "設定…".into(),
+            restart: "再起動".into(),
             quit: "終了".into(),
         },
         _ => MenuStrings {
             show_widget: "显示小组件".into(),
-            theme_sub: "外观".into(),
+            theme_sub: "外观设置".into(),
             theme_auto: "跟随系统".into(),
-            theme_light: "浅色".into(),
-            theme_dark: "深色".into(),
+            theme_light: "浅色模式".into(),
+            theme_dark: "深色模式".into(),
             lang_sub: "语言".into(),
             lang_zh: "简体中文".into(),
             lang_en: "English".into(),
@@ -264,9 +277,34 @@ fn menu_strings(lang: &str) -> MenuStrings {
             refresh_now: "立即刷新".into(),
             open_folder: "打开数据目录".into(),
             setup_wizard: "设置…".into(),
-            quit: "退出".into(),
+            restart: "重新启动".into(),
+            quit: "退出程序".into(),
         },
     }
+}
+
+/// 重启应用：先让 shell 在后台延迟 open 新实例（避开 single-instance 接管），
+/// 再退出当前进程。sleep 1s 保证旧进程已退出，新实例不会被 single-instance 移交拦截。
+/// 致命坑：绝不能 std::thread::spawn(sleep).exit —— exit 会连 sleep 线程一起杀掉，open 永不执行。
+#[cfg(target_os = "macos")]
+fn relaunch(app: &AppHandle) {
+    if let Ok(exe) = std::env::current_exe() {
+        // exe = /Applications/xxx.app/Contents/MacOS/xxx
+        if let Some(bundle) = exe
+            .parent()      // MacOS
+            .and_then(|p| p.parent())  // Contents
+            .and_then(|p| p.parent())  // xxx.app
+        {
+            let script = format!("sleep 1; open '{}'", bundle.display());
+            let _ = std::process::Command::new("sh").arg("-c").arg(script).spawn();
+        }
+    }
+    app.exit(0);
+}
+
+#[cfg(not(target_os = "macos"))]
+fn relaunch(app: &AppHandle) {
+    app.exit(0);
 }
 
 fn build_main_menu(app: &AppHandle, s: &Settings) -> tauri::menu::Menu<tauri::Wry> {
@@ -334,10 +372,12 @@ fn build_main_menu(app: &AppHandle, s: &Settings) -> tauri::menu::Menu<tauri::Wr
     items.push(&sep);
     items.push(&refresh_now);
     let setup_wizard_item = MenuItem::with_id(app, "open_setup", &m.setup_wizard, true, None::<&str>).unwrap();
+    let restart_item      = MenuItem::with_id(app, "restart", &m.restart, true, None::<&str>).unwrap();
     items.push(&open_folder);
     items.push(&sep);
     items.push(&setup_wizard_item);
     items.push(&sep);
+    items.push(&restart_item);
     items.push(&quit);
     let menu = Menu::with_items(app, &items).unwrap();
 
@@ -846,6 +886,209 @@ fn is_dnd_active_cmd() -> bool {
     is_dnd_active()
 }
 
+/// 久坐提醒通知文案池（与 Python 端 SEDENTARY_MSGS 风格一致，随机抽一条）
+const SEDENTARY_NOTIFY_MSGS: [&str; 8] = [
+    "已经静坐 {m} 分钟了，椅子都要长你身上了，起来晃晃？",
+    "检测到人类已静止 {m} 分钟，本助理怀疑你被封印了，快解开！",
+    "你的屁股和椅子已经谈了 {m} 分钟恋爱，该分手透透气了",
+    "{m} 分钟没见你挪窝，血液都要罢工了，走两步呗",
+    "静坐 {m} 分钟达成！奖励是更硬的腰和更僵的脖子，起来领罚？",
+    "本健康监测员已记录你静坐 {m} 分钟，再不动我要去告状了",
+    "检测到坐姿锁定 {m} 分钟，系统建议：站起来活动一下",
+    "{m} 分钟稳如泰山，起来诈个尸吧",
+];
+
+/// 以本 app（Health Dashboard）身份弹 macOS 系统通知：久坐提醒
+/// 前端在检测到 data.json 里 remind_event 变化时调用；勿扰模式由前端先判断。
+#[tauri::command]
+fn show_sedentary_notification(app: AppHandle, idle_min: i64) -> Result<(), String> {
+    use tauri_plugin_notification::NotificationExt;
+    let n = app.notification();
+    // 首次会触发系统授权弹窗；已授权则直接发（拒绝则静默放弃，小组件仍在提醒）
+    if let Ok(state) = n.permission_state() {
+        if state != tauri_plugin_notification::PermissionState::Granted {
+            let _ = n.request_permission();
+        }
+    }
+    let idx = (chrono::Utc::now().timestamp_subsec_nanos() as usize) % SEDENTARY_NOTIFY_MSGS.len();
+    let body = SEDENTARY_NOTIFY_MSGS[idx].replace("{m}", &idle_min.to_string());
+    n.builder()
+        .title("健康提醒")
+        .body(body)
+        .sound("Glass")
+        .show()
+        .map_err(|e| e.to_string())
+}
+
+/// 菜单栏图标下方的久坐提醒弹窗（与小组件内弹窗同款样式）。
+/// 首次调用时创建 label="sed-pop" 的小窗（200×92，透明无装饰），后续复用只 show + 重定位。
+/// 定位：托盘图标 rect 中心 x 对齐窗口中心，y = 图标底部 + 6px（macOS 菜单栏高度约 24-32）。
+// 取主屏（菜单栏/托盘所在屏）的缩放比。tray.rect() 在 macOS 返回 Physical(设备像素)，
+// 而 window.position() 需要 Logical(点)，两者相差一个 scale。
+#[cfg(target_os = "macos")]
+fn primary_scale() -> f64 {
+    unsafe {
+        let primary: *mut Object = msg_send![class!(NSScreen), mainScreen];
+        if primary.is_null() { return 1.0; }
+        let scale: f64 = msg_send![primary, backingScaleFactor];
+        if scale > 0.0 { scale } else { 1.0 }
+    }
+}
+#[cfg(not(target_os = "macos"))]
+fn primary_scale() -> f64 { 1.0 }
+
+// 返回包含给定逻辑坐标点的显示器边界 (x, y, w, h)，坐标系与 collect_displays 一致
+// （主屏顶为原点、Y 向下）。用于在多屏环境下把弹窗钳制到托盘所属屏内，杜绝负坐标越界。
+fn display_bounds_containing(px: f64, py: f64) -> Option<(f64, f64, f64, f64)> {
+    for d in collect_displays() {
+        let x = d["x"].as_f64()?;
+        let y = d["y"].as_f64()?;
+        let w = d["width"].as_f64()?;
+        let h = d["height"].as_f64()?;
+        if px >= x && px <= x + w && py >= y && py <= y + h {
+            return Some((x, y, w, h));
+        }
+    }
+    None
+}
+
+// 前端运行时错误回收：把 window.onerror / unhandledrejection / console.error
+// 追加写入数据目录的 hd_fe_err.txt，便于排查"窗口空白"类渲染崩溃（沙箱无法读系统日志）。
+#[tauri::command]
+fn report_fe_error(app: AppHandle, msg: String) {
+    if let Ok(dir) = app.path().app_data_dir() {
+        let _ = std::fs::create_dir_all(&dir);
+        let p = dir.join("hd_fe_err.txt");
+        use std::io::Write;
+        if let Ok(mut f) = std::fs::OpenOptions::new().create(true).append(true).open(&p) {
+            let ts = chrono::Local::now().format("%H:%M:%S").to_string();
+            let _ = writeln!(f, "[{}] {}", ts, msg);
+        }
+    }
+}
+
+#[tauri::command]
+fn show_sed_popover(app: AppHandle) -> Result<(), String> {
+    const POP_W: f64 = 200.0;
+    const POP_H: f64 = 92.0;
+
+    let scale = primary_scale();
+
+    let mut target_pos = None;
+    if let Some(tray) = app.tray_by_id("main") {
+        if let Ok(rect) = tray.rect() {
+            if let Some(r) = rect {
+                let raw_x = match r.position {
+                    tauri::Position::Physical(p) => p.x as f64,
+                    tauri::Position::Logical(p) => p.x,
+                };
+                let raw_y = match r.position {
+                    tauri::Position::Physical(p) => p.y as f64,
+                    tauri::Position::Logical(p) => p.y,
+                };
+                let raw_w = match r.size {
+                    tauri::Size::Physical(s) => s.width as f64,
+                    tauri::Size::Logical(s) => s.width,
+                };
+                let raw_h = match r.size {
+                    tauri::Size::Physical(s) => s.height as f64,
+                    tauri::Size::Logical(s) => s.height,
+                };
+                let is_phys = matches!(r.position, tauri::Position::Physical(_));
+                // Physical(设备像素) -> Logical(点)，否则坐标会被放大 scale 倍而错位
+                let (px, py) = if is_phys { (raw_x / scale, raw_y / scale) } else { (raw_x, raw_y) };
+                let (pw, ph) = if is_phys { (raw_w / scale, raw_h / scale) } else { (raw_w, raw_h) };
+                // 弹窗在托盘正下方、水平居中对齐托盘中心
+                let mut tx = px + pw / 2.0 - POP_W / 2.0;
+                let mut ty = py + ph + 6.0;
+                // 钳制到托盘所属显示器内；多屏/状态栏布局异常时 tray.rect() 偶发返回越界坐标，
+                // 此时回退到主屏菜单栏右侧下方（健康图标常驻于菜单栏右侧），保证弹窗一定可见且贴近图标。
+                match display_bounds_containing(px, py) {
+                    Some(b) => {
+                        tx = tx.max(b.0 + 8.0).min(b.0 + b.2 - POP_W - 8.0);
+                        ty = ty.max(b.1 + 28.0).min(b.1 + b.3 - POP_H - 8.0);
+                    }
+                    None => {
+                        if let Some(primary) = collect_displays().get(0) {
+                            let sx = primary["x"].as_f64().unwrap_or(0.0);
+                            let sy = primary["y"].as_f64().unwrap_or(0.0);
+                            let sw = primary["width"].as_f64().unwrap_or(1920.0);
+                            tx = sx + sw - POP_W - 12.0;
+                            ty = sy + 32.0;
+                            eprintln!("[health] tray rect off-screen, fallback to primary menu bar right");
+                        }
+                    }
+                }
+                let dbg = format!(
+                    "[show_sed_popover] raw=({:.0},{:.0}){} size={:.0}x{:.0} scale={} | logical tray=({:.1},{:.1}) popover=({:.1},{:.1})\n",
+                    raw_x, raw_y, if is_phys { "P" } else { "L" }, raw_w, raw_h, scale, px, py, tx, ty
+                );
+                let _ = std::fs::write(
+                    "/Users/dfrobot/Library/Application Support/com.arrhealth.healthdashboard/hd_popover_debug.txt",
+                    &dbg,
+                );
+                eprintln!("[health] Tray logical pos=({:.1},{:.1}) popover=({:.1},{:.1})", px, py, tx, ty);
+                target_pos = Some((tx, ty));
+            }
+        }
+    }
+
+    if target_pos.is_none() {
+        eprintln!("[health] Tray rect unavailable, falling back to primary monitor menu bar.");
+        let screens = collect_displays();
+        if let Some(primary) = screens.get(0) {
+            let sx = primary["x"].as_i64().unwrap_or(0) as f64;
+            let sy = primary["y"].as_i64().unwrap_or(0) as f64;
+            let sw = primary["width"].as_i64().unwrap_or(1920) as f64;
+            target_pos = Some((sx + sw / 2.0 - POP_W / 2.0, sy + 32.0)); 
+        }
+    }
+
+    let (x, y) = target_pos.ok_or("Could not determine popover position")?;
+    eprintln!("[health] Final popover position: ({}, {})", x, y);
+
+    if let Some(win) = app.get_webview_window("sed-pop") {
+        let _ = win.close();
+    }
+
+    let win = tauri::WebviewWindowBuilder::new(
+        &app,
+        "sed-pop",
+        tauri::WebviewUrl::App("index.html".into()),
+    )
+    .title("久坐提醒")
+    .inner_size(POP_W, POP_H)
+    .position(x, y)
+    .decorations(false)
+    .transparent(true)
+    .resizable(false)
+    .skip_taskbar(true)
+    .always_on_top(true)
+    .focused(true)
+    .shadow(false)
+    .build()
+    .map_err(|e| e.to_string())?;
+    
+    #[cfg(target_os = "macos")]
+    unsafe {
+        if let Ok(ns) = win.ns_window() {
+            let ns = ns as *mut objc::runtime::Object;
+            let _: () = objc::msg_send![ns, orderFrontRegardless];
+        }
+    }
+
+    Ok(())
+}
+
+/// 隐藏菜单栏久坐弹窗（前端按钮点击后调用）
+#[tauri::command]
+fn hide_sed_popover(app: AppHandle) -> Result<(), String> {
+    if let Some(win) = app.get_webview_window("sed-pop") {
+        let _ = win.hide();
+    }
+    Ok(())
+}
+
 /// 立即更新采集间隔（前端不用保存就生效）
 #[tauri::command]
 fn update_refresh_interval(app: AppHandle, seconds: u64) -> Result<(), String> {
@@ -1126,6 +1369,8 @@ fn main() {
                 let _ = win.set_focus();
             }
         }))
+        // 久坐提醒：以本 app 身份发系统通知（通知中心显示来源为 Health Dashboard）
+        .plugin(tauri_plugin_notification::init())
         // liquid_glass 插件已弃用（见 import 注释）
         .setup(|app| {
             // macOS：强制 Accessory 激活策略（不在 Dock 显示、不抢菜单栏/焦点）
@@ -1295,6 +1540,7 @@ fn main() {
 
                         match id {
                             "quit" => app.exit(0),
+                            "restart" => relaunch(app),
                             "refresh_now" => { let _ = app.emit("refresh-now", ()); }
                             "open_setup" => {
                                 ensure_setup_server(app.clone());
@@ -1424,6 +1670,9 @@ fn main() {
             save_settings,
             set_autostart_cmd,
             is_dnd_active_cmd,
+            show_sedentary_notification,
+            show_sed_popover,
+            hide_sed_popover,
             get_appearance,
             list_displays,
             set_position,
@@ -1431,6 +1680,7 @@ fn main() {
             toggle_autostart_setting,
             toggle_dnd_setting,
             open_external,
+            report_fe_error,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
