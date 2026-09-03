@@ -448,7 +448,9 @@ function Widget({ data, settings, onRefresh, onReset, justResetAt, sedPopRef, dn
     popDismissed = !!(rec && rec.date === t.date && rec.idle === idleMin);
   } catch (e) {}
   const dndBlock = settings.respect_dnd && dndActive;
-  const showSedPop = (effSed || forceWidgetPop) && effIdle != null && !popDismissed && !dndBlock;
+  const snoozeUntil = Number(t.snooze_until || 0);
+  const snoozed = snoozeUntil > Date.now();
+  const showSedPop = (effSed || forceWidgetPop) && effIdle != null && !popDismissed && !dndBlock && !snoozed;
 
   const dismissSedPop = function () {
     try { localStorage.setItem(SED_POP_KEY, JSON.stringify({ date: t.date, idle: idleMin })); } catch (e) {}
@@ -469,13 +471,13 @@ function Widget({ data, settings, onRefresh, onReset, justResetAt, sedPopRef, dn
       {effSed && effIdle != null && (
         <div ref={function (el) { sedPopRef.current = el; }} style={{ position: "absolute", top: "calc(100% + 8px)", left: "50%", marginLeft: -93, width: 186, zIndex: 50, borderRadius: 12, padding: "9px 11px 8px", background: "rgba(38,30,18,0.92)", backdropFilter: "blur(20px)", WebkitBackdropFilter: "blur(20px)", border: "1px solid rgba(255,159,10,0.45)", display: showSedPop ? "block" : "none", animation: "sed-pop .4s cubic-bezier(.2,.9,.3,1.15)" }}>
           <div style={{ position: "absolute", top: -4.5, left: "50%", marginLeft: -4.5, width: 9, height: 9, background: "rgba(38,30,18,0.92)", borderLeft: "1px solid rgba(255,159,10,0.45)", borderTop: "1px solid rgba(255,159,10,0.45)", transform: "rotate(45deg)" }} />
-          <div style={{ fontSize: 10.5, fontWeight: 700, color: C.amber, letterSpacing: 0.2, display: "flex", alignItems: "center", gap: 5 }}>
+          <div style={{ fontSize: 10.5, fontWeight: 700, color: "#FF9F0A", letterSpacing: 0.2, display: "flex", alignItems: "center", gap: 5 }}>
             {ICO.chair}<span>{T("sedentaryMin", { m: idleMin })}</span>
           </div>
           <div style={{ fontSize: 8.5, color: "rgba(255,159,10,0.65)", marginTop: 2 }}>{T("standHint")}</div>
           <div style={{ display: "flex", gap: 6, marginTop: 7 }}>
-            <div onMouseDown={function (e) { e.preventDefault(); e.stopPropagation(); if (sedPopRef.current) sedPopRef.current.style.display = "none"; dismissSedPop(); }} style={{ flex: 1, textAlign: "center", fontSize: 9, fontWeight: 600, color: "rgba(255,159,10,0.65)", border: "1px solid rgba(255,159,10,0.35)", padding: "3px 0", borderRadius: 99, cursor: "pointer" }}>{T("later")}</div>
-            <div onMouseDown={function (e) { e.preventDefault(); e.stopPropagation(); if (sedPopRef.current) sedPopRef.current.style.display = "none"; dismissSedPop(); onReset(); }} style={{ flex: 1, textAlign: "center", fontSize: 9, fontWeight: 600, color: "#0a0a0c", background: C.amber, padding: "4px 0", borderRadius: 99, cursor: "pointer" }}>{T("stoodUp")}</div>
+            <div onClick={function () { if (sedPopRef.current) sedPopRef.current.style.display = "none"; dismissSedPop(); try { invoke("snooze_sedentary", { minutes: 30 }); invoke("hide_sed_popover"); } catch (e) {} }} style={{ flex: 1, textAlign: "center", fontSize: 9, fontWeight: 600, color: "rgba(255,159,10,0.65)", border: "1px solid rgba(255,159,10,0.35)", padding: "3px 0", borderRadius: 99, cursor: "pointer" }}>{T("later")}</div>
+            <div onClick={function () { if (sedPopRef.current) sedPopRef.current.style.display = "none"; dismissSedPop(); try { onReset(); invoke("hide_sed_popover"); } catch (e) {} }} style={{ flex: 1, textAlign: "center", fontSize: 9, fontWeight: 600, color: "#0a0a0c", background: "#FF9F0A", padding: "4px 0", borderRadius: 99, cursor: "pointer" }}>{T("stoodUp")}</div>
           </div>
         </div>
       )}
@@ -851,15 +853,17 @@ export default function App() {
         }
         // 久坐提醒弹窗：Python 触发提醒时会在 data.json 写 remind_event（ms 时间戳），
         // 检测到新事件 → 在菜单栏图标下方弹出提醒面板（样式/文案与小组件弹窗一致）；
-        // 勿扰模式下只亮小组件不弹
+        // 勿扰模式 / 用户已点"稍后"（snooze_until 未过期）则只亮小组件不弹
         const remindEvent = today.remind_event || 0;
+        const snoozeUntil2 = Number(today.snooze_until || 0);
+        const snoozed2 = snoozeUntil2 > Date.now();
         if (remindEvent > 0 && remindEvent !== lastRemindRef.current) {
           lastRemindRef.current = remindEvent;
           if (tauriAvailable()) {
             setForceWidgetPop(true);
             let dnd = false;
             if (s && s.respect_dnd) { try { dnd = await invoke("is_dnd_active"); } catch (e) {} }
-            if (!dnd) {
+            if (!dnd && !snoozed2) {
               try { await invoke("show_sed_popover"); } catch (e) {}
             }
           }

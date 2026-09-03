@@ -856,6 +856,29 @@ fn reset_sedentary(app: AppHandle) -> Result<(), String> {
     std::fs::write(&data, serde_json::to_string_pretty(&v).unwrap()).map_err(|e| e.to_string())
 }
 
+/// 用户点"稍后"：设置 snooze_until，让菜单栏弹窗与小组件弹窗共享同一份抑制状态。
+#[tauri::command]
+fn snooze_sedentary(app: AppHandle, minutes: u64) -> Result<(), String> {
+    let (_, data, _, _) = paths(&app);
+    let content = std::fs::read_to_string(&data).map_err(|e| e.to_string())?;
+    let mut v: serde_json::Value = serde_json::from_str(&content).map_err(|e| e.to_string())?;
+    let now_ms = chrono::Utc::now().timestamp_millis();
+    let until = now_ms + (minutes as i64) * 60_000;
+    let today = v["today"]["date"].as_str().unwrap_or("").to_string();
+
+    if let Some(hist) = v.get_mut("history").and_then(|h| h.as_array_mut()) {
+        for h in hist.iter_mut() {
+            if h.get("date").and_then(|d| d.as_str()) == Some(today.as_str()) {
+                h["snooze_until"] = serde_json::Value::Number(until.into());
+            }
+        }
+    }
+    if let Some(t) = v.get_mut("today") {
+        t["snooze_until"] = serde_json::Value::Number(until.into());
+    }
+    std::fs::write(&data, serde_json::to_string_pretty(&v).unwrap()).map_err(|e| e.to_string())
+}
+
 #[tauri::command]
 fn get_settings(app: AppHandle) -> String {
     serde_json::to_string(&load_settings(&app)).unwrap_or_else(|_| "{}".into())
@@ -969,8 +992,8 @@ fn report_fe_error(app: AppHandle, msg: String) {
 
 #[tauri::command]
 fn show_sed_popover(app: AppHandle) -> Result<(), String> {
-    const POP_W: f64 = 200.0;
-    const POP_H: f64 = 92.0;
+    const POP_W: f64 = 210.0;   // 186 卡片 + 左右余量（修复内容被裁）
+    const POP_H: f64 = 102.0;   // 卡片 + 箭头 + 上下余量
 
     let scale = primary_scale();
 
@@ -998,15 +1021,15 @@ fn show_sed_popover(app: AppHandle) -> Result<(), String> {
                 // Physical(设备像素) -> Logical(点)，否则坐标会被放大 scale 倍而错位
                 let (px, py) = if is_phys { (raw_x / scale, raw_y / scale) } else { (raw_x, raw_y) };
                 let (pw, ph) = if is_phys { (raw_w / scale, raw_h / scale) } else { (raw_w, raw_h) };
-                // 弹窗在托盘正下方、水平居中对齐托盘中心
+                // 弹窗在托盘正下方、水平居中对齐托盘中心；y 贴近图标底部（2px 缝隙）
                 let mut tx = px + pw / 2.0 - POP_W / 2.0;
-                let mut ty = py + ph + 6.0;
+                let mut ty = py + ph + 2.0;
                 // 钳制到托盘所属显示器内；多屏/状态栏布局异常时 tray.rect() 偶发返回越界坐标，
                 // 此时回退到主屏菜单栏右侧下方（健康图标常驻于菜单栏右侧），保证弹窗一定可见且贴近图标。
                 match display_bounds_containing(px, py) {
                     Some(b) => {
                         tx = tx.max(b.0 + 8.0).min(b.0 + b.2 - POP_W - 8.0);
-                        ty = ty.max(b.1 + 28.0).min(b.1 + b.3 - POP_H - 8.0);
+                        ty = ty.max(b.1 + 22.0).min(b.1 + b.3 - POP_H - 8.0);
                     }
                     None => {
                         if let Some(primary) = collect_displays().get(0) {
@@ -1074,6 +1097,8 @@ fn show_sed_popover(app: AppHandle) -> Result<(), String> {
         if let Ok(ns) = win.ns_window() {
             let ns = ns as *mut objc::runtime::Object;
             let _: () = objc::msg_send![ns, orderFrontRegardless];
+            // 设为主/key 窗口，避免 macOS 把首次点击吃掉去激活窗口，实现「一点即响应」
+            let _: () = objc::msg_send![ns, makeKeyWindow];
         }
     }
 
@@ -1666,6 +1691,7 @@ fn main() {
             refresh_now,
             ai_chat,
             reset_sedentary,
+            snooze_sedentary,
             get_settings,
             save_settings,
             set_autostart_cmd,

@@ -29,8 +29,10 @@ export default function SedPopover() {
         const d = JSON.parse(s);
         const t = (d && d.today) || {};
         setIdleMin(t.idle_min || 0);
-        if (!t.sedentary) {
-          // 不久坐：内容隐藏 + 真正收起原生窗口，避免透明窗口壳残留
+        const snoozeUntil = Number(t.snooze_until || 0);
+        const snoozed = snoozeUntil > Date.now();
+        if (!t.sedentary || snoozed) {
+          // 不久坐 / 已点"稍后"：内容隐藏 + 真正收起原生窗口，避免透明窗口壳残留
           setDismissed(true);
           getCurrentWindow().hide().catch(() => {});
         } else {
@@ -43,8 +45,9 @@ export default function SedPopover() {
     return () => { dead = true; clearInterval(id); };
   }, []);
 
-  const onLater = () => {
+  const onLater = async () => {
     setDismissed(true);
+    try { await invoke("snooze_sedentary", { minutes: 30 }); } catch (e) {}
     getCurrentWindow().hide().catch(() => {});
   };
   const onStoodUp = async () => {
@@ -56,23 +59,25 @@ export default function SedPopover() {
   if (dismissed) return null;
 
   return (
-    <div
+      <div
       className="sed-popover"
       style={{
         width: "100%", height: "100%", boxSizing: "border-box",
-        display: "flex", alignItems: "center", justifyContent: "center",
+        display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "flex-start",
+        paddingTop: 14,
         background: "transparent",
       }}
     >
       <div
         style={{
           width: 186, borderRadius: 12, padding: "9px 11px 8px",
+          boxSizing: "border-box", position: "relative",
           background: "rgba(38,30,18,0.92)", backdropFilter: "blur(20px)", WebkitBackdropFilter: "blur(20px)",
           border: "1px solid rgba(255,159,10,0.45)",
           animation: "sed-pop .4s cubic-bezier(.2,.9,.3,1.15)",
           fontFamily: "-apple-system, BlinkMacSystemFont, 'SF Pro Text', 'PingFang SC', sans-serif",
         }}
-        onMouseDown={(e) => e.stopPropagation()}
+        onClick={(e) => e.stopPropagation()}
       >
         {/* 顶部箭头（指向菜单栏图标） */}
         <div style={{ position: "absolute", top: -4.5, left: "50%", marginLeft: -4.5, width: 9, height: 9, background: "rgba(38,30,18,0.92)", borderLeft: "1px solid rgba(255,159,10,0.45)", borderTop: "1px solid rgba(255,159,10,0.45)", transform: "rotate(45deg)" }} />
@@ -82,11 +87,11 @@ export default function SedPopover() {
         <div style={{ fontSize: 8.5, color: "rgba(255,159,10,0.65)", marginTop: 2 }}>{T("standHint")}</div>
         <div style={{ display: "flex", gap: 6, marginTop: 7 }}>
           <div
-            onMouseDown={(e) => { e.preventDefault(); e.stopPropagation(); onLater(); }}
+            onClick={onLater}
             style={{ flex: 1, textAlign: "center", fontSize: 9, fontWeight: 600, color: "rgba(255,159,10,0.65)", border: "1px solid rgba(255,159,10,0.35)", padding: "3px 0", borderRadius: 99, cursor: "pointer" }}
           >{T("later")}</div>
           <div
-            onMouseDown={(e) => { e.preventDefault(); e.stopPropagation(); onStoodUp(); }}
+            onClick={onStoodUp}
             style={{ flex: 1, textAlign: "center", fontSize: 9, fontWeight: 600, color: "#0a0a0c", background: AMBER, padding: "4px 0", borderRadius: 99, cursor: "pointer" }}
           >{T("stoodUp")}</div>
         </div>
