@@ -11,12 +11,15 @@ macOS 桌面健康小组件：从 Google Health API 拉取步数、心率、睡�
 - 步数 / 距离 / 卡路里 / 活跃分钟
 - 实时心率 / HRV / 血氧 / 呼吸率
 - 睡眠阶段（深睡 / 浅睡 / REM / 清醒）
-- 情绪球桌面萌宠（呼吸、眨眼、自动换表情，久坐变愤怒/出错）
-- LLM 提示语：配置任意 OpenAI 兼容 API（如 DeepSeek），每次数据变化生成 20 字内个性化提示
-- 久坐提醒弹窗 + 点击「起来了」立即重置
-- 长按标题栏拖拽移动，位置自动记忆（重启后保持）
-- 刷新间隔 5 / 15 / 30 分钟可选，点击刷新图标即刻拉取
-- 液态玻璃磨砂面板：渐变描边 + 顶部受光 + 悬浮投影，Apple 风格超椭圆连续曲率圆角（28px）
+- 情绪球桌面萌宠：呼吸、眨眼、自动换表情；**眼睛跟随鼠标光标**（gaze）；久坐变愤怒 / 出错
+- LLM 提示语：设置里配置任意 OpenAI 兼容 API（默认走 Gemini，国内需换火山方舟等可用端点），每次数据变化生成 20 字内个性化提示
+- 久坐提醒：从**菜单栏图标正下方弹出小窗**（SedPopover），点击「起来了」立即重置；勿扰模式不弹
+- 菜单栏图标（TrayIcon）菜单：
+  `显示小组件 / 外观设置(跟随系统·浅色·深色) / 语言 / 开机自启动 / 免打扰时静默 / 数据更新 / 久坐提醒 / 立即刷新 / 打开数据目录 / 设置… / 重新启动 / 退出程序`
+- **重新启动**项：点击经 `relaunch` 真正重启应用（规避 single-instance 接管）
+- 位置固定，对齐 macOS 桌面小组件（不提供拖拽，重启后保持）
+- 刷新间隔 5 / 15 / 30 分钟预设可选，点击刷新图标即刻拉取
+- 毛玻璃磨砂面板：blur(54px) 深色 Apple 系统色，无投影、无高光层
 - 三语言界面（简体中文 / English / 日本語）
 
 ## 安装
@@ -48,16 +51,18 @@ npm run tauri build   # 产物：src-tauri/target/release/bundle/macos/Health Da
 ```
 health-dashboard-tauri/
 ├── src/                    # 前端（React 18 + Vite）
-│   ├── App.jsx             # 主组件：小组件 UI、设置面板、情绪球 iframe
+│   ├── App.jsx             # 主组件：小组件 UI、设置面板、情绪球 iframe、gaze 跟随
+│   ├── SedPopover.jsx      # 久坐提醒菜单栏弹窗
 │   ├── main.jsx            # React 入口
 │   ├── styles.css          # 样式与动画
+│   ├── i18n.js             # 三语言词条 + t(key)
 │   └── emotion-ball/       # 情绪球引擎（内联进 iframe，零 HTTP 服务）
 ├── src-tauri/              # Tauri 后端（Rust）
-│   ├── src/main.rs         # 窗口管理、拖拽定位持久化、TrayIcon、采集调度、命令
+│   ├── src/main.rs         # 窗口管理、TrayIcon 菜单、采集调度、命令、relaunch
 │   ├── resources/
 │   │   ├── fetch_standalone.py  # Google Health 采集（写 JSON，每 5 分钟）
 │   │   └── setup.html           # 设置引导页（浏览器打开）
-│   ├── tauri.conf.json     # 窗口配置（344×272，透明无边框）
+│   ├── tauri.conf.json     # 窗口配置（透明无边框）
 │   ├── capabilities/       # Tauri 2 ACL 权限
 │   └── Cargo.toml
 ├── index.html
@@ -81,13 +86,16 @@ React 组件渲染
 - **手动刷新**：前端 `invoke('refresh_now')` → Rust 调 Python → 写 `data.json`
 - **久坐重置**：前端 `invoke('reset_sedentary')` → Rust 直接改 `data.json`
 - **前端轮询**：每 5 秒 `invoke('read_data')` 读 `data.json`，数据变化即重渲染
-- **点击即刻响应**：90 秒前端窗口强制显示归零状态，不等后端采集
+- **点击即刻响应**：窗口强制显示归零状态，不等后端采集
 
-## 已知限制
+## 已知限制 / 贡献须知
 
 - 打包后需要目标机器有 Python 3 环境（采集脚本依赖）
 - Google Health 首次使用需通过浏览器引导页完成 OAuth 授权
 - 窗口透明 + 置顶效果针对 macOS 优化，其他平台玻璃感会退化
+- **构建坑（贡献者必读）**：本项目在 zh / ja 菜单分支里，独立的 2 字中文串（`重启` / `退出` / `外观` / `浅色` / `深色`）会被 rustc / LLVM 在编译时从二进制丢弃，导致空标签菜单项。菜单标签一律用 3 字以上（如 `重新启动` / `退出程序` / `外观设置` / `浅色模式` / `深色模式`）。
+- bundle id 为 `com.arrhealth.healthdashboard`（出现于 `main.rs`、Info.plist），开源可改为通用反向域名，不强制。
+- 受限环境（如沙箱）下 `npm run tauri build` 的 DMG 打包步骤可能因挂卷限制失败，但 `.app` 产物完好，不影响使用与部署。
 
 ## License
 
