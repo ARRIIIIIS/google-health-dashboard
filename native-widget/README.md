@@ -62,6 +62,32 @@ WidgetKit 的 Timeline 由系统统一调度，**不能按需即时刷新**。�
 运行一次宿主 App（`HealthWidget`）后，组件即出现在系统小组件库：
 点击桌面空白处 → 右上角「编辑小组件」/ 菜单栏小组件按钮 → 找到「健康」→ 拖到桌面。
 
+## 桌面搜不到组件？排查（最常见坑）
+
+现象：宿主 App 能跑，但桌面「编辑小组件」里搜不到「健康」。
+
+根因几乎都是 **widget extension 没有被嵌入宿主 App**。系统只登记打包进
+`.app/Contents/PlugIns/` 的扩展；若只建了 `dependencies` 而没 `embed`，`.appex` 不会被
+拷进去，桌面自然搜不到。本工程的 `project.yml` 已通过宿主 App 的 `embed:` 字段修正这一点。
+
+按下面顺序确认：
+
+1. **改过 `project.yml` 后必须重新生成工程**（旧的 `.xcodeproj` 仍是旧的 embed 配置）：
+   ```bash
+   cd native-widget && xcodegen generate
+   ```
+2. Xcode 里选 `HealthWidget` scheme → Run。运行后在 Finder 里右键
+   `HealthWidget.app` → 显示包内容 → 确认有 `Contents/PlugIns/HealthWidgetExtension.appex`。
+   没有这个文件夹 = 还没嵌进去，回到第 1 步重生成并检查 `project.yml` 的 `embed`。
+3. 首次运行后，退出 Xcode 启动的那个 App 实例，**重新**进入桌面「编辑小组件」面板
+   （有时需要先把面板关掉再打开一次，让系统重新枚举组件）。
+4. 若仍不显示，注销并重新登录 macOS（WidgetKit 守护进程偶尔需要重启会话才枚举新组件）。
+5. 确认两个 target 的 **Deployment Target ≥ macOS 13**（桌面小组件库是 Ventura 才有的）。
+
+> 注意：方式 B（Xcode 手动建）也必须做「把 Widget Extension target 的
+> Product 嵌入到 App」这一步——在 App target 的 Build Phases → Embed App Extensions
+> 里确认 `.appex` 被勾选嵌入。漏掉这一步同样是「能跑 App、搜不到组件」。
+
 ## 文件结构
 
 ```

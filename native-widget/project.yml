@@ -17,6 +17,10 @@ targets:
       - path: HealthWidget
     info: HealthWidget/Info.plist
     entitlements: HealthWidget/HealthWidget.entitlements
+    # 关键：必须把 widget extension 嵌入宿主 App（.app/Contents/PlugIns/），
+    # 系统才会登记这个桌面小组件。只写 dependencies 不会嵌入，桌面搜不到。
+    embed:
+      - target: HealthWidgetExtension
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.arrhealth.healthwidget
