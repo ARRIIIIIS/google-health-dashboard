@@ -1,0 +1,37 @@
+# project.yml —— 用 XcodeGen 生成 .xcodeproj（brew install xcodegen && xcodegen generate）
+name: HealthWidget
+options:
+  bundleIdPrefix: com.arrhealth.healthwidget
+settings:
+  base:
+    MARKETING_VERSION: "1.0"
+    CURRENT_PROJECT_VERSION: "1"
+    MACOSX_DEPLOYMENT_TARGET: "13.0"
+    SWIFT_VERSION: "5.9"
+packages: {}
+targets:
+  HealthWidget:
+    type: application
+    platform: macOS
+    sources:
+      - path: HealthWidget
+    info: HealthWidget/Info.plist
+    entitlements: HealthWidget/HealthWidget.entitlements
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.arrhealth.healthwidget
+        CODE_SIGN_STYLE: Automatic
+
+  HealthWidgetExtension:
+    type: app-extension
+    platform: macOS
+    sources:
+      - path: HealthWidgetExtension
+    info: HealthWidgetExtension/Info.plist
+    entitlements: HealthWidgetExtension/HealthWidgetExtension.entitlements
+    dependencies:
+      - target: HealthWidget
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.arrhealth.healthwidget.extension
+        CODE_SIGN_STYLE: Automatic
