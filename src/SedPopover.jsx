@@ -77,7 +77,7 @@ export default function SedPopover() {
           animation: "sed-pop .4s cubic-bezier(.2,.9,.3,1.15)",
           fontFamily: "-apple-system, BlinkMacSystemFont, 'SF Pro Text', 'PingFang SC', sans-serif",
         }}
-        onClick={(e) => e.stopPropagation()}
+        onMouseDown={(e) => e.stopPropagation()}
       >
         {/* 顶部箭头（指向菜单栏图标） */}
         <div style={{ position: "absolute", top: -4.5, left: "50%", marginLeft: -4.5, width: 9, height: 9, background: "rgba(38,30,18,0.92)", borderLeft: "1px solid rgba(255,159,10,0.45)", borderTop: "1px solid rgba(255,159,10,0.45)", transform: "rotate(45deg)" }} />
@@ -87,11 +87,11 @@ export default function SedPopover() {
         <div style={{ fontSize: 8.5, color: "rgba(255,159,10,0.65)", marginTop: 2 }}>{T("standHint")}</div>
         <div style={{ display: "flex", gap: 6, marginTop: 7 }}>
           <div
-            onClick={onLater}
+            onMouseDown={function (e) { e.stopPropagation(); onLater(); }}
             style={{ flex: 1, textAlign: "center", fontSize: 9, fontWeight: 600, color: "rgba(255,159,10,0.65)", border: "1px solid rgba(255,159,10,0.35)", padding: "3px 0", borderRadius: 99, cursor: "pointer" }}
           >{T("later")}</div>
           <div
-            onClick={onStoodUp}
+            onMouseDown={function (e) { e.stopPropagation(); onStoodUp(); }}
             style={{ flex: 1, textAlign: "center", fontSize: 9, fontWeight: 600, color: "#0a0a0c", background: AMBER, padding: "4px 0", borderRadius: 99, cursor: "pointer" }}
           >{T("stoodUp")}</div>
         </div>

@@ -944,35 +944,83 @@ fn show_sedentary_notification(app: AppHandle, idle_min: i64) -> Result<(), Stri
 }
 
 /// 菜单栏图标下方的久坐提醒弹窗（与小组件内弹窗同款样式）。
-/// 首次调用时创建 label="sed-pop" 的小窗（200×92，透明无装饰），后续复用只 show + 重定位。
-/// 定位：托盘图标 rect 中心 x 对齐窗口中心，y = 图标底部 + 6px（macOS 菜单栏高度约 24-32）。
-// 取主屏（菜单栏/托盘所在屏）的缩放比。tray.rect() 在 macOS 返回 Physical(设备像素)，
-// 而 window.position() 需要 Logical(点)，两者相差一个 scale。
+/// 首次调用时创建 label="sed-pop" 的小窗（透明无装饰），后续复用只 show + 重定位。
+/// 定位：以 Cocoa 取状态项窗口真实 frame（CG 坐标），水平居中、垂直贴图标下方 2px，
+/// 全程在 CG 空间完成对齐与钳制，再换算到 Tauri 坐标，彻底规避 tray.rect() 多屏越界问题。
+
+// 显示器信息：Tauri 坐标系（左上原点、Y 向下）矩形 (x,y,w,h)，
+// 以及对应的 CG 坐标系（左下原点、Y 向上）原点 (cgx,cgy)，用于托盘/弹窗几何换算。
 #[cfg(target_os = "macos")]
-fn primary_scale() -> f64 {
+struct Disp {
+    id: i32,
+    name: String,
+    is_primary: bool,
+    x: f64, y: f64, w: f64, h: f64, // Tauri 矩形
+    cgx: f64, cgy: f64,            // CG 原点（左下）
+}
+
+// 列出所有显示器，同时带 Tauri 矩形与 CG 原点，供 collect_displays 与弹窗定位共用。
+#[cfg(target_os = "macos")]
+fn displays_full() -> Vec<Disp> {
     unsafe {
+        let screens: *mut Object = msg_send![class!(NSScreen), screens];
+        let count: usize = msg_send![screens, count];
         let primary: *mut Object = msg_send![class!(NSScreen), mainScreen];
-        if primary.is_null() { return 1.0; }
-        let scale: f64 = msg_send![primary, backingScaleFactor];
-        if scale > 0.0 { scale } else { 1.0 }
+        let pf: NSRect = msg_send![primary, frame];
+        let primary_hash: i32 = msg_send![primary, hash];
+        let mut arr = Vec::new();
+        for i in 0..count {
+            let s: *mut Object = msg_send![screens, objectAtIndex: i];
+            let f: NSRect = msg_send![s, frame];
+            let name: *mut Object = msg_send![s, localizedName];
+            let name_str = if !name.is_null() {
+                let cstr: *const c_char = msg_send![name, UTF8String];
+                if !cstr.is_null() {
+                    std::ffi::CStr::from_ptr(cstr).to_string_lossy().into_owned()
+                } else { "Display".to_string() }
+            } else { "Display".to_string() };
+            let hid: i32 = msg_send![s, hash];
+            // Tauri y 由 CG（Y 向上）翻转得到，与 collect_displays 历史实现一致
+            let ty = pf.origin.y + pf.size.height - (f.origin.y + f.size.height);
+            arr.push(Disp {
+                id: hid,
+                name: name_str,
+                is_primary: hid == primary_hash,
+                x: f.origin.x,
+                y: ty,
+                w: f.size.width,
+                h: f.size.height,
+                cgx: f.origin.x,
+                cgy: f.origin.y,
+            });
+        }
+        arr
     }
 }
-#[cfg(not(target_os = "macos"))]
-fn primary_scale() -> f64 { 1.0 }
 
-// 返回包含给定逻辑坐标点的显示器边界 (x, y, w, h)，坐标系与 collect_displays 一致
-// （主屏顶为原点、Y 向下）。用于在多屏环境下把弹窗钳制到托盘所属屏内，杜绝负坐标越界。
-fn display_bounds_containing(px: f64, py: f64) -> Option<(f64, f64, f64, f64)> {
-    for d in collect_displays() {
-        let x = d["x"].as_f64()?;
-        let y = d["y"].as_f64()?;
-        let w = d["width"].as_f64()?;
-        let h = d["height"].as_f64()?;
-        if px >= x && px <= x + w && py >= y && py <= y + h {
-            return Some((x, y, w, h));
+// 取菜单栏状态项窗口的真实屏幕 frame（CG 坐标系，Y 向上）。
+// 本 app 仅一个状态项，找 class 含 "StatusBar" 的顶层窗口即可。
+#[cfg(target_os = "macos")]
+fn status_bar_frame_cg() -> Option<(f64, f64, f64, f64)> {
+    unsafe {
+        let app: *mut Object = msg_send![class!(NSApplication), sharedApplication];
+        if app.is_null() { return None; }
+        let windows: *mut Object = msg_send![app, windows];
+        let count: usize = msg_send![windows, count];
+        for i in 0..count {
+            let w: *mut Object = msg_send![windows, objectAtIndex: i];
+            let cls: *mut Object = msg_send![w, className];
+            if cls.is_null() { continue; }
+            let cstr: *const c_char = msg_send![cls, UTF8String];
+            if cstr.is_null() { continue; }
+            let name = std::ffi::CStr::from_ptr(cstr).to_string_lossy();
+            if name.contains("StatusBar") {
+                let f: NSRect = msg_send![w, frame];
+                return Some((f.origin.x, f.origin.y, f.size.width, f.size.height));
+            }
         }
+        None
     }
-    None
 }
 
 // 前端运行时错误回收：把 window.onerror / unhandledrejection / console.error
@@ -995,75 +1043,58 @@ fn show_sed_popover(app: AppHandle) -> Result<(), String> {
     const POP_W: f64 = 210.0;   // 186 卡片 + 左右余量（修复内容被裁）
     const POP_H: f64 = 102.0;   // 卡片 + 箭头 + 上下余量
 
-    let scale = primary_scale();
-
     let mut target_pos = None;
-    if let Some(tray) = app.tray_by_id("main") {
-        if let Ok(rect) = tray.rect() {
-            if let Some(r) = rect {
-                let raw_x = match r.position {
-                    tauri::Position::Physical(p) => p.x as f64,
-                    tauri::Position::Logical(p) => p.x,
-                };
-                let raw_y = match r.position {
-                    tauri::Position::Physical(p) => p.y as f64,
-                    tauri::Position::Logical(p) => p.y,
-                };
-                let raw_w = match r.size {
-                    tauri::Size::Physical(s) => s.width as f64,
-                    tauri::Size::Logical(s) => s.width,
-                };
-                let raw_h = match r.size {
-                    tauri::Size::Physical(s) => s.height as f64,
-                    tauri::Size::Logical(s) => s.height,
-                };
-                let is_phys = matches!(r.position, tauri::Position::Physical(_));
-                // Physical(设备像素) -> Logical(点)，否则坐标会被放大 scale 倍而错位
-                let (px, py) = if is_phys { (raw_x / scale, raw_y / scale) } else { (raw_x, raw_y) };
-                let (pw, ph) = if is_phys { (raw_w / scale, raw_h / scale) } else { (raw_w, raw_h) };
-                // 弹窗在托盘正下方、水平居中对齐托盘中心；y 贴近图标底部（2px 缝隙）
-                let mut tx = px + pw / 2.0 - POP_W / 2.0;
-                let mut ty = py + ph + 2.0;
-                // 钳制到托盘所属显示器内；多屏/状态栏布局异常时 tray.rect() 偶发返回越界坐标，
-                // 此时回退到主屏菜单栏右侧下方（健康图标常驻于菜单栏右侧），保证弹窗一定可见且贴近图标。
-                match display_bounds_containing(px, py) {
-                    Some(b) => {
-                        tx = tx.max(b.0 + 8.0).min(b.0 + b.2 - POP_W - 8.0);
-                        ty = ty.max(b.1 + 22.0).min(b.1 + b.3 - POP_H - 8.0);
-                    }
-                    None => {
-                        if let Some(primary) = collect_displays().get(0) {
-                            let sx = primary["x"].as_f64().unwrap_or(0.0);
-                            let sy = primary["y"].as_f64().unwrap_or(0.0);
-                            let sw = primary["width"].as_f64().unwrap_or(1920.0);
-                            tx = sx + sw - POP_W - 12.0;
-                            ty = sy + 32.0;
-                            eprintln!("[health] tray rect off-screen, fallback to primary menu bar right");
-                        }
-                    }
-                }
+
+    // 直接用 Cocoa 取状态项窗口真实 frame（CG 坐标，Y 向上），在 CG 空间完成对齐与钳制，
+    // 再换算到 Tauri 坐标（Y 向下）。彻底绕开 tray.rect() 的 Physical/CG 语义歧义与多屏越界问题。
+    #[cfg(target_os = "macos")]
+    {
+        if let Some((sx, sy, sw, sh)) = status_bar_frame_cg() {
+            // 状态项中心（CG 坐标，Y 向上）
+            let ccx = sx + sw / 2.0;
+            let ccy = sy + sh / 2.0;
+            // 找到状态项所在显示器（用 CG 原点判定包含关系）
+            let disp = displays_full().into_iter().find(|d| {
+                ccx >= d.cgx && ccx <= d.cgx + d.w && ccy >= d.cgy && ccy <= d.cgy + d.h
+            });
+            if let Some(d) = disp {
+                // 弹窗水平居中对齐状态项中心；垂直贴在状态项底边下方 2px（CG 中"下"=y 更小）
+                let pop_left_cg = ccx - POP_W / 2.0;
+                let pop_bottom_cg = sy - 2.0; // 弹窗底边 = 状态项顶边 - 2px 缝隙
+                // CG -> Tauri（Y 翻转，自显示器顶向下）
+                let mut tx = pop_left_cg - d.cgx + d.x;
+                let bottom_ty = d.y + d.h - (pop_bottom_cg - d.cgy);
+                let mut ty = bottom_ty - POP_H;
+                // 钳制进显示器内，杜绝越界/多屏错位
+                tx = tx.max(d.x + 4.0).min(d.x + d.w - POP_W - 4.0);
+                ty = ty.max(d.y + 4.0).min(d.y + d.h - POP_H - 4.0);
                 let dbg = format!(
-                    "[show_sed_popover] raw=({:.0},{:.0}){} size={:.0}x{:.0} scale={} | logical tray=({:.1},{:.1}) popover=({:.1},{:.1})\n",
-                    raw_x, raw_y, if is_phys { "P" } else { "L" }, raw_w, raw_h, scale, px, py, tx, ty
+                    "[show_sed_popover] CG status=({:.0},{:.0})+{:.0}x{:.0} | Tauri popup=({:.1},{:.1}) disp=({:.0},{:.0})+{:.0}x{:.0} primary={}\n",
+                    sx, sy, sw, sh, tx, ty, d.x, d.y, d.w, d.h, d.is_primary
                 );
                 let _ = std::fs::write(
                     "/Users/dfrobot/Library/Application Support/com.arrhealth.healthdashboard/hd_popover_debug.txt",
                     &dbg,
                 );
-                eprintln!("[health] Tray logical pos=({:.1},{:.1}) popover=({:.1},{:.1})", px, py, tx, ty);
+                eprintln!("[health] {}", dbg.trim());
                 target_pos = Some((tx, ty));
             }
         }
     }
 
+    // 兜底：拿不到状态项 frame（理论上不会发生），贴主屏菜单栏右侧。
     if target_pos.is_none() {
-        eprintln!("[health] Tray rect unavailable, falling back to primary monitor menu bar.");
-        let screens = collect_displays();
-        if let Some(primary) = screens.get(0) {
-            let sx = primary["x"].as_i64().unwrap_or(0) as f64;
-            let sy = primary["y"].as_i64().unwrap_or(0) as f64;
-            let sw = primary["width"].as_i64().unwrap_or(1920) as f64;
-            target_pos = Some((sx + sw / 2.0 - POP_W / 2.0, sy + 32.0)); 
+        #[cfg(target_os = "macos")]
+        {
+            let screens = displays_full();
+            if let Some(primary) = screens.iter().find(|d| d.is_primary).or_else(|| screens.first()) {
+                target_pos = Some((primary.x + primary.w - POP_W - 12.0, primary.y + 32.0));
+                eprintln!("[health] status bar frame unavailable, fallback to primary menu bar right");
+            }
+        }
+        #[cfg(not(target_os = "macos"))]
+        {
+            target_pos = Some((100.0, 100.0));
         }
     }
 
@@ -1097,8 +1128,6 @@ fn show_sed_popover(app: AppHandle) -> Result<(), String> {
         if let Ok(ns) = win.ns_window() {
             let ns = ns as *mut objc::runtime::Object;
             let _: () = objc::msg_send![ns, orderFrontRegardless];
-            // 设为主/key 窗口，避免 macOS 把首次点击吃掉去激活窗口，实现「一点即响应」
-            let _: () = objc::msg_send![ns, makeKeyWindow];
         }
     }
 
@@ -1330,41 +1359,23 @@ fn get_appearance() -> String {
 }
 
 /// 列出显示器（Tauri 坐标系：左上原点，y 向下）。用于「指定显示器定位」。
-/// 列出所有显示器（NSScreen hashValue 作为唯一 id，Tauri 坐标系：左上原点 y 向下）
-/// 供 list_displays 命令与菜单"屏幕"子菜单共用
+/// 直接由 displays_full() 映射而来，保持对外 JSON 结构不变（id=hash，isPrimary 等）。
 #[cfg(target_os = "macos")]
 fn collect_displays() -> Vec<serde_json::Value> {
-    unsafe {
-        let screens: *mut Object = msg_send![class!(NSScreen), screens];
-        let count: usize = msg_send![screens, count];
-        let primary: *mut Object = msg_send![class!(NSScreen), mainScreen];
-        let pf: NSRect = msg_send![primary, frame];
-        let primary_hash: i32 = msg_send![primary, hash];
-        let mut arr = Vec::new();
-        for i in 0..count {
-            let s: *mut Object = msg_send![screens, objectAtIndex: i];
-            let f: NSRect = msg_send![s, frame];
-            let name: *mut Object = msg_send![s, localizedName];
-            let name_str = if !name.is_null() {
-                let cstr: *const c_char = msg_send![name, UTF8String];
-                if !cstr.is_null() {
-                    std::ffi::CStr::from_ptr(cstr).to_string_lossy().into_owned()
-                } else { "Display".to_string() }
-            } else { "Display".to_string() };
-            let hid: i32 = msg_send![s, hash];
-            let ty = pf.origin.y + pf.size.height - (f.origin.y + f.size.height);
-            arr.push(serde_json::json!({
-                "id": hid,
-                "name": name_str,
-                "x": f.origin.x as i32,
-                "y": ty as i32,
-                "width": f.size.width as i32,
-                "height": f.size.height as i32,
-                "isPrimary": hid == primary_hash,
-            }));
-        }
-        arr
-    }
+    displays_full()
+        .iter()
+        .map(|d| {
+            serde_json::json!({
+                "id": d.id,
+                "name": d.name,
+                "x": d.x as i32,
+                "y": d.y as i32,
+                "width": d.w as i32,
+                "height": d.h as i32,
+                "isPrimary": d.is_primary,
+            })
+        })
+        .collect()
 }
 #[cfg(not(target_os = "macos"))]
 fn collect_displays() -> Vec<serde_json::Value> { vec![] }
