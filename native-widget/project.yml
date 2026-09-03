@@ -2,6 +2,7 @@
 name: HealthWidget
 options:
   bundleIdPrefix: com.arrhealth.healthwidget
+  organizationName: ARRIIIIIS
 settings:
   base:
     MARKETING_VERSION: "1.0"
@@ -15,14 +16,14 @@ targets:
     platform: macOS
     sources:
       - path: HealthWidget
-    info: HealthWidget/Info.plist
-    entitlements: HealthWidget/HealthWidget.entitlements
+    infoFile: HealthWidget/Info.plist
     # 关键：必须把 widget extension 嵌入宿主 App（.app/Contents/PlugIns/），
     # 系统才会登记这个桌面小组件。只写 dependencies 不会嵌入，桌面搜不到。
     embed:
-      - target: HealthWidgetExtension
+      - HealthWidgetExtension
     settings:
       base:
+        CODE_SIGN_ENTITLEMENTS: HealthWidget/HealthWidget.entitlements
         PRODUCT_BUNDLE_IDENTIFIER: com.arrhealth.healthwidget
         CODE_SIGN_STYLE: Automatic
 
@@ -31,11 +32,9 @@ targets:
     platform: macOS
     sources:
       - path: HealthWidgetExtension
-    info: HealthWidgetExtension/Info.plist
-    entitlements: HealthWidgetExtension/HealthWidgetExtension.entitlements
-    dependencies:
-      - target: HealthWidget
+    infoFile: HealthWidgetExtension/Info.plist
     settings:
       base:
+        CODE_SIGN_ENTITLEMENTS: HealthWidgetExtension/HealthWidgetExtension.entitlements
         PRODUCT_BUNDLE_IDENTIFIER: com.arrhealth.healthwidget.extension
         CODE_SIGN_STYLE: Automatic

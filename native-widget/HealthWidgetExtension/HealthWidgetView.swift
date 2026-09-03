@@ -44,9 +44,7 @@ struct HealthWidgetView: View {
         }
         .padding(14)
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
-        .containerBackground(for: .widget) {
-            Color.black.opacity(0.30)
-        }
+        .background(Color.black.opacity(0.30))
     }
 
     // ── 顶栏 ──
@@ -242,7 +240,7 @@ struct HealthWidgetView: View {
 
     // ── AI tip（本地兜底池，按分钟轮换；原生无 LLM 调用）──
     @ViewBuilder private var tipRow: some View {
-        HStack(spacing: 6, alignment: .top) {
+        HStack(alignment: .top, spacing: 6) {
             Circle().fill(C.blue).frame(width: 4, height: 4)
                 .shadow(color: C.blue, radius: 3)
             Text(tipText)

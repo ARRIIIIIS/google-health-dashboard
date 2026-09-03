@@ -17,27 +17,38 @@
 | 情绪球（跟鼠标的实时画布） | ✗ 用静态心情字形替代 |
 | 刷新按钮 | ✗ 装饰性，无操作（WidgetKit 刷新由系统调度） |
 
-## 构建（两种方式任选）
+## 构建与安装（推荐用脚本，一条命令）
 
-### 方式 A：XcodeGen（推荐，一条命令）
+本机 XcodeGen 2.46 的 `embed` 字段会被静默忽略（不会生成 "Embed App Extensions"
+阶段），导致 `.appex` 不会被打进 `.app`，桌面小组件库因此搜不到。
+**所以不要只跑 `xcodegen generate` 就 Run**，请用下面的脚本：它在 xcodebuild 之后
+手动把 `.appex` 拷进 `.app/Contents/PlugIns/` 并重签名，等价于正确的嵌入。
+
 ```bash
-brew install xcodegen
 cd native-widget
-xcodegen generate
-open HealthWidget.xcodeproj
-# 选 HealthWidget scheme → Run（或 Archive 后安装）
+chmod +x build_and_install.sh
+./build_and_install.sh
+# 装好后去桌面右键「编辑小组件」→ 搜索「健康」→ 拖到桌面
 ```
 
-### 方式 B：Xcode 手动
+脚本会：xcodegen 生成工程 → 编译 extension + app → 拷贝 `.appex` 进
+`HealthWidget.app/Contents/PlugIns/` → ad-hoc 重签名 → 安装到 `/Applications`。
+
+> 注：脚本用 ad-hoc 签名（`codesign --sign -`），本地运行足够。若首次打开
+> `/Applications/HealthWidget.app` 被 Gatekeeper 拦截，右键「打开」或在
+> 系统设置→隐私与安全性里允许即可。若想用开发者证书签名，把脚本里的
+> `--sign -` 换成你的证书名（如 `Apple Development: ...`）。
+
+### 方式 B：Xcode 手动（仅参考）
 1. Xcode → New → Project → macOS → App，Product Name `HealthWidget`，Interface SwiftUI，关闭「Core Data」。
 2. File → New → Target → macOS → Widget Extension，名称 `HealthWidgetExtension`，**不要**勾选「Include Configuration Intent」。
 3. 把本目录 `HealthWidget/` 与 `HealthWidgetExtension/` 下的 `.swift` 覆盖进对应 target（删掉 Xcode 自动生成的模板文件）。
 4. 两个 target 的 Signing & Capabilities 里**删除 App Sandbox**（或把 entitlements 里的 `com.apple.security.app-sandbox` 设为 `false`）。
 5. 两个 target 的 Deployment Target 设为 **macOS 13.0+**。
-6. Run。
+6. **关键**：在 App target 的 Build Phases 里手动添加「Embed App Extensions」阶段并勾选 `.appex`（XcodeGen 的 embed 在本机不生效，手动工程必须自己嵌）。
+7. Run，或 Archive 后装到 `/Applications`。
 
 > 本机需 Xcode 15+（Swift 5.9，`homeDirectoryForCurrentUser` 需 macOS 13）。
-> 我没有 Xcode 环境，无法替你编译验证，请在你本机构建。
 
 ## 数据流
 
