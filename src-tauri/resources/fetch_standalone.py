@@ -632,6 +632,9 @@ def check_sedentary(today_entry, prev_today, steps, now):
             today_entry["steps_at_ack"] = 0
             today_entry["last_move_time_before_ack"] = ""
             today_entry["sedentary_notified"] = False  # 允许再次弹窗
+            # 防说谎是最高优先级「抓包」：被抓到没真走，就作废此前点的「稍后」，
+            # 让再提醒穿透 snooze 静默期强制弹出。
+            today_entry["snooze_until"] = 0
             # 重新计算 idle_min（基于回滚后的 last_move_time）
             last_move_time = today_entry.get("last_move_time", last_move_time)
 
