@@ -180,6 +180,32 @@
   .card-desc a { color: var(--accent); text-decoration: none; }
   .card-desc a:hover { text-decoration: underline; }
 
+  /* ── API 延迟测试行（每张卡片底部各一条，数据 API 与 LLM API 独立）── */
+  .test-row {
+    display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
+    margin: 16px 0 0 42px; padding-top: 14px;
+    border-top: 1px solid rgba(255,255,255,0.07);
+  }
+  .test-info { flex: 1; min-width: 170px; }
+  .test-title { display: block; font-size: 12.5px; font-weight: 600; color: var(--text); }
+  .test-hint  { display: block; font-size: 11.5px; color: var(--text-secondary); margin-top: 2px; line-height: 1.5; }
+  .btn-test {
+    padding: 7px 15px; font-size: 12.5px; font-weight: 600; font-family: var(--font);
+    color: #fff; background: var(--accent); border: none; border-radius: 9px;
+    cursor: pointer; flex-shrink: 0; transition: background .2s, opacity .2s;
+  }
+  .btn-test:hover:not(:disabled) { background: var(--accent-hover); }
+  .btn-test:disabled { opacity: .65; cursor: default; }
+  .btn-test.ok  { background: var(--success); }
+  .btn-test.err { background: var(--danger); }
+  .test-result {
+    flex-basis: 100%; font-size: 11.5px; line-height: 1.55;
+    color: var(--text-secondary); font-variant-numeric: tabular-nums;
+    word-break: break-word;
+  }
+  .test-result.ok  { color: var(--success); }
+  .test-result.err { color: #ff6961; }
+
   /* ── How-to guide ── */
   details.howto {
     border: 1px dashed rgba(255,255,255,0.14);
@@ -534,6 +560,16 @@
           <input id="gsec" type="password" placeholder="GOCSAX-xxxx" autocomplete="off" spellcheck="false" oninput="step(1)">
         </div>
       </div>
+
+      <!-- 数据 API 延迟测试 -->
+      <div class="test-row">
+        <div class="test-info">
+          <span class="test-title">数据 API 延迟测试</span>
+          <span class="test-hint">验证 Google 健康接口凭证是否有效，并测量往返延迟。</span>
+        </div>
+        <button type="button" class="btn-test" id="test-data-btn" onclick="testApi('data')">测试</button>
+        <div class="test-result" id="test-data-result"></div>
+      </div>
     </div>
 
     <!-- AI 健康建议 -->
@@ -593,6 +629,16 @@
           <label>模型</label>
           <input id="lmod" type="text" placeholder="deepseek-v4-flash" value="deepseek-v4-flash" autocomplete="off" spellcheck="false" oninput="step(2)">
         </div>
+      </div>
+
+      <!-- LLM API 延迟测试：用当前输入框的值（未保存也能测） -->
+      <div class="test-row">
+        <div class="test-info">
+          <span class="test-title">LLM API 延迟测试</span>
+          <span class="test-hint">用上方 Base URL / Key / 模型发一条最小请求，验证是否生效并测量延迟。</span>
+        </div>
+        <button type="button" class="btn-test" id="test-llm-btn" onclick="testApi('llm')">测试</button>
+        <div class="test-result" id="test-llm-result"></div>
       </div>
     </div>
 
@@ -702,6 +748,60 @@
     var v = document.getElementById('success');
     v.classList.add('show');
     document.querySelectorAll('.dot').forEach(function(d) { d.classList.add('done'); d.classList.remove('active'); });
+  }
+
+  /* ── API 延迟测试：数据 API（Google）与 LLM API 各自独立 ── */
+  var TESTING = { data: false, llm: false };
+
+  function setTestResult(kind, msg, cls) {
+    var btn = document.getElementById('test-' + kind + '-btn');
+    var res = document.getElementById('test-' + kind + '-result');
+    res.textContent = msg || '';
+    res.className = 'test-result' + (cls ? ' ' + cls : '');
+    btn.className = 'btn-test' + (cls ? ' ' + cls : '');
+  }
+
+  async function testApi(kind) {
+    if (TESTING[kind]) return;
+    TESTING[kind] = true;
+    var btn = document.getElementById('test-' + kind + '-btn');
+    btn.disabled = true;
+    btn.textContent = '测试中…';
+    setTestResult(kind, '', '');
+
+    var payload = {};
+    if (kind === 'llm') {
+      // 用页面当前输入值，未保存也能测；留空的字段由后端回落到已保存设置
+      payload = {
+        base_url: document.getElementById('lurl').value.trim(),
+        api_key:  document.getElementById('lkey').value.trim(),
+        model:    document.getElementById('lmod').value.trim(),
+      };
+    }
+
+    var t0 = Date.now();
+    try {
+      var res = await fetch('/api/test-' + kind, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      });
+      var d = await res.json().catch(function(){ return {}; });
+      var wall = Date.now() - t0;
+      var ms = (typeof d.ms === 'number' && d.ms > 0) ? d.ms : wall;
+      if (d.ok) {
+        setTestResult(kind, '正常 · ' + ms + ' ms · ' + (d.detail || ''), 'ok');
+        btn.textContent = '测试成功';
+      } else {
+        setTestResult(kind, '失败 · ' + ms + ' ms · ' + (d.detail || '未知错误'), 'err');
+        btn.textContent = '重新测试';
+      }
+    } catch (e) {
+      setTestResult(kind, '连接失败：' + e.message + '（设置页服务未运行？）', 'err');
+      btn.textContent = '重新测试';
+    }
+    btn.disabled = false;
+    TESTING[kind] = false;
   }
 
   async function handleSave() {

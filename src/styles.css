@@ -17,6 +17,26 @@ body,
   -moz-osx-font-smoothing: grayscale;
 }
 
+/* 设置面板可滚动，但 macOS overlay 滚动条在透明玻璃上几乎不可见，
+   用户会以为内容就这么多、不知道能滚。显式画一条细滚动条作为「可滚动」提示。 */
+::-webkit-scrollbar {
+  width: 4px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  background: rgba(128, 128, 128, 0.55);
+  border-radius: 99px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: rgba(128, 128, 128, 0.8);
+}
+/* 桌面小组件窗口为固定尺寸，body 本身永不滚动，隐藏 body 级滚动条 */
+body::-webkit-scrollbar {
+  width: 0;
+}
+
 /* 久坐提醒动画（原 Übersicht className 注入的 @keyframes，改为标准 CSS） */
 @keyframes sed-pulse {
   0%,

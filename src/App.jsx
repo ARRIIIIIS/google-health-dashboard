@@ -6,6 +6,7 @@
 // ─────────────────────────────────────────────────────────────────────────────
 import React, { useEffect, useRef, useState, useCallback } from "react";
 import { invoke } from "@tauri-apps/api/core";
+import { getCurrentWindow } from "@tauri-apps/api/window";
 import { t as T, setLang, getLang, LANGS } from "./i18n.js";
 
 // 设置引导页（浏览器中完成 Google 授权 / AI 配置）。改目标改这里即可。
@@ -29,15 +30,16 @@ const EB_LIBS = [ringsJs, emotionsJs, ballJs, engineJs]
 
 // ── Apple system palette ─────────────────────────────────────────────────────
 const C_DARK = {
-  label: "rgba(255,255,255,0.95)",
-  second: "rgba(250,250,252,0.86)",
-  third: "rgba(245,245,250,0.66)",
-  // 深色下要「透」但也要「浮得起来」：加深 tint 让面板与壁纸拉开对比（用户反馈对比度不够）
-  bg: "linear-gradient(160deg, rgba(48,48,54,0.34) 0%, rgba(26,26,30,0.26) 100%)",
+  // 三级文字：玻璃通透后背景会透上来，alpha 太低会被背景吃掉 → 全面提高不透明度
+  label: "rgba(255,255,255,1)",
+  second: "rgba(255,255,255,0.96)",
+  third: "rgba(255,255,255,0.85)",
+  // 冷调玻璃：蓝灰 tint（R<B 且 G 居中）透出系统磨砂，贴近 Apple 深色系统色
+  bg: "linear-gradient(160deg, rgba(44,46,54,0.32) 0%, rgba(24,26,32,0.24) 100%)",
   card: "rgba(255,255,255,0.10)",
   hairline: "rgba(255,255,255,0.12)",
   // 玻璃顶棱（受光），深色下提亮才能看清面板边界
-  rim: "rgba(255,255,255,0.30)",
+  rim: "rgba(255,255,255,0.24)",
   rimSoft: "rgba(255,255,255,0.12)",
   // 玻璃控件底（刷新按钮/芯片/设置控件统一）
   glassCtl: "rgba(255,255,255,0.10)",
@@ -50,12 +52,13 @@ const C_DARK = {
   alert: "#FF453A",
 };
 const C_LIGHT = {
-  label: "rgba(28,28,30,0.95)",
-  second: "rgba(60,60,67,0.90)",
-  third: "rgba(60,60,67,0.55)",
+  // 浅色下反向操作：文字压到近纯黑并保持高不透明度，才能从透光的玻璃上「咬」出来
+  label: "rgba(0,0,0,0.98)",
+  second: "rgba(24,24,28,0.96)",
+  third: "rgba(35,35,42,0.86)",
   // 系统 NSVisualEffectView 提供真实液态玻璃模糊，前端只叠极薄白色 tint 提亮。
   // 0.74 太重盖住玻璃 → 0.22 透出系统模糊；再降到 0.10/0.05（用户「很透」偏好）
-  bg: "linear-gradient(160deg, rgba(240,240,246,0.10) 0%, rgba(232,232,240,0.05) 100%)",
+  bg: "linear-gradient(160deg, rgba(236,238,248,0.10) 0%, rgba(228,230,242,0.05) 100%)",
   card: "rgba(0,0,0,0.03)",
   hairline: "rgba(0,0,0,0.07)",
   rim: "rgba(255,255,255,0.45)",
@@ -71,44 +74,23 @@ const C_LIGHT = {
 };
 // 本地提示兜底池：LLM 未配置 / 失败时启用（蓝点），按分钟轮换保证「久不更新」也能变
 const SEDENTARY_TIPS = [
-  "久坐伤身，起身走走更健康。",
-  "站起来伸个懒腰，感觉会更好。",
-  "久坐提醒：起来接杯水吧。",
-  "离开椅子活动两分钟，腰背会感谢你。",
+  "已经坐了快一小时，起身活动两分钟吧，腰背和颈椎都会舒服很多。",
+  "离开椅子到窗边走走吧，舒展筋骨看看远处，让眼睛也放松一下吧。",
+  "久坐让身体变得紧绷了，起身倒杯水伸个懒腰吧，真的会舒服很多。",
+  "坐久了脖子和腰都很疲劳，起身拉伸两分钟，身体会重新充满活力。",
 ];
 const FALLBACK_TIPS = [
-  "喝杯水，活动一下筋骨吧。",
-  "深呼吸，放松一下肩膀。",
-  "休息一会，眼睛看向远方。",
-  "保持节奏，劳逸结合。",
-  "今天的目标很接近了，加油！",
-  "保持好心情，状态会更好。",
-  "适当补水，身体更轻松。",
-  "午后容易困，动一动提提神。",
+  "喝杯温水润润喉，起身活动两分钟，让身体从工位中短暂抽离出来。",
+  "深呼吸几次放松肩膀，舒展一下手腕脖子，让久坐的身体缓口气吧。",
+  "休息一下看看远方，活动颈椎和手腕，眨眨眼让眼睛也放松一下吧。",
+  "保持节奏张弛有度，工作和休息都要兼顾，状态才会更稳定更持久。",
+  "今天的目标已经很接近，深呼吸继续坚持吧，加油，你一定可以的。",
+  "保持好心情很重要，深呼吸给自己一个微笑，状态一定会慢慢变好。",
+  "工作再忙也要记得喝水，起身倒杯水走两步吧，身体会很感谢你的。",
+  "午后容易困倦没精神，深呼吸提提神，起身走动两分钟真的会清醒。",
 ];
 // 当前生效调色板（随系统/设置切换）
 let C = C_DARK;
-
-// Apple 风格连续曲线（squircle）：用超椭圆(n=5)采样四角，替代正圆 border-radius
-const SQUIRCLE = (function () {
-  const w = 344, h = 272, r = 36, n = 5, k = 2 / n, seg = 20;
-  const corners = [
-    { cx: r, cy: r, sx: -1, sy: -1, t0: 0, t1: Math.PI / 2 },
-    { cx: w - r, cy: r, sx: 1, sy: -1, t0: Math.PI / 2, t1: 0 },
-    { cx: w - r, cy: h - r, sx: 1, sy: 1, t0: 0, t1: Math.PI / 2 },
-    { cx: r, cy: h - r, sx: -1, sy: 1, t0: 0, t1: Math.PI / 2 },
-  ];
-  const p = [];
-  corners.forEach((c) => {
-    for (let i = 0; i <= seg; i++) {
-      const a = c.t0 + (c.t1 - c.t0) * (i / seg);
-      const dx = r * Math.pow(Math.abs(Math.cos(a)), k);
-      const dy = r * Math.pow(Math.abs(Math.sin(a)), k);
-      p.push([c.cx + c.sx * dx, c.cy + c.sy * dy]);
-    }
-  });
-  return "path('" + p.map((q) => q[0].toFixed(2) + " " + q[1].toFixed(2)).join(" L ") + " Z')";
-})();
 
 // 磨砂由系统 NSVisualEffectView 提供（HudWindow 材质），前端不再模拟噪点/高光
 
@@ -166,7 +148,7 @@ function cleanTip(s) {
 }
 
 // ── Settings panel（覆盖在小组件之上的滚动设置层）────────────────────────────
-function SettingsPanel({ draft, setDraft, onSave, onCancel, busy, rerender, systemDark, onTestApi, testStatus }) {
+function SettingsPanel({ draft, setDraft, onSave, onCancel, busy, rerender, systemDark, onTestApi, testStatus, onTestDataApi, testDataStatus }) {
   const set = (k, v) => setDraft((d) => ({ ...d, [k]: v }));
   const guideCard = { background: "rgba(128,128,128,0.08)", border: "1px solid " + C.hairline, borderRadius: 12, padding: "9px 11px", marginTop: 6 };
   const guideBtn = { display: "inline-block", marginTop: 7, fontSize: 10, fontWeight: 600, color: "#fff", background: C.blue, padding: "5px 11px", borderRadius: 8, cursor: "pointer" };
@@ -182,6 +164,27 @@ function SettingsPanel({ draft, setDraft, onSave, onCancel, busy, rerender, syst
     borderRadius: 7, padding: "4px 7px", outline: "none",
   };
   const labelStyle = { fontSize: 10.5, fontWeight: 600, color: C.second, marginTop: 9, display: "block" };
+
+  // API 测试行：内嵌在「对应 API 的设置卡片」里（数据 API → Google 卡片，LLM → AI 卡片），
+  // 避免测试入口被挤出可视区、需要长距离滚动才找得到。
+  const apiTestRow = (onTest, status) => {
+    const st = status?.status;
+    const btnBg = st === "testing" ? C.amber : st === "ok" ? C.green : st === "error" ? C.alert : C.blue;
+    const btnText = st === "testing" ? "测试中…" : st === "ok" ? "测试成功" : st === "error" ? "重新测试" : "测试延迟";
+    return (
+      <div style={{ marginTop: 7 }}>
+        <div onClick={st === "testing" ? undefined : onTest}
+          style={{ ...guideBtn, marginTop: 0, background: btnBg, opacity: st === "testing" ? 0.7 : 1 }}>
+          {btnText}
+        </div >
+        {status && status.message && (
+          <div style={{ fontSize: 8.5, color: st === "error" ? C.alert : C.second, marginTop: 4, lineHeight: 1.35, fontVariantNumeric: "tabular-nums" }}>
+            {status.message}
+          </div >
+        )}
+      </div >
+    );
+  };
   const rowStyle = { display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8, marginTop: 9 };
   const checkStyle = (checked) => ({
     width: 16, height: 16, borderRadius: 4, border: "1.5px solid " + (checked ? C.blue : C.hairline),
@@ -200,7 +203,7 @@ function SettingsPanel({ draft, setDraft, onSave, onCancel, busy, rerender, syst
       onContextMenu={(e) => e.preventDefault()}
       style={{
         position: "absolute", inset: 0, zIndex: 100, overflowY: "auto", overflowX: "hidden",
-        padding: "12px 14px 16px", borderRadius: 36, WebkitClipPath: SQUIRCLE, clipPath: SQUIRCLE,
+        padding: "12px 14px 16px", borderRadius: 36,
         background: C.bg,
         border: "1px solid " + C.hairline, boxSizing: "border-box",
       }}
@@ -305,28 +308,20 @@ function SettingsPanel({ draft, setDraft, onSave, onCancel, busy, rerender, syst
 
       <div style={{ height: 1, background: C.hairline, margin: "10px 0 4px" }} />
 
-      {/* ── Google 健康（浏览器引导）── */}
+      {/* ── Google 健康（浏览器引导 + 数据 API 延迟测试）── */}
       <div style={guideCard}>
         <div style={{ fontSize: 11, fontWeight: 700, color: C.label }}>Google 健康数据</div >
-        <div style={{ fontSize: 9.5, color: C.third, marginTop: 3, lineHeight: 1.35 }}>需在浏览器中完成 Google 授权（OAuth）。点击按钮在默认浏览器打开设置向导。</div >
-        <div onClick={() => openExternal(GOOGLE_SETUP_URL)} style={guideBtn}>在浏览器中设置 →</div >
+        <div style={{ fontSize: 9.5, color: C.third, marginTop: 3, lineHeight: 1.35 }}>配置 Google 授权与 AI 模型（Base URL / Key / 模型）。点击在浏览器打开本地设置页，可在页内直接测延迟。</div >
+        <div onClick={() => { tauriAvailable() ? invoke("open_setup_wizard_cmd").catch(() => {}) : openExternal(GOOGLE_SETUP_URL); }} style={guideBtn}>在浏览器中设置 →</div >
+        {apiTestRow(onTestDataApi, testDataStatus)}
       </div >
 
-      {/* ── AI 模型（浏览器引导）── */}
+      {/* ── AI 模型（浏览器引导 + LLM API 延迟测试）── */}
       <div style={guideCard}>
         <div style={{ fontSize: 11, fontWeight: 700, color: C.label }}>AI 提示语</div >
-        <div style={{ fontSize: 9.5, color: C.third, marginTop: 3, lineHeight: 1.35 }}>在浏览器中配置大模型（Base URL / API Key / 模型）。点击按钮打开配置页。</div >
-        <div onClick={() => openExternal(AI_SETUP_URL)} style={guideBtn}>在浏览器中设置 →</div >
-      </div >
-
-      {/* ── LLM API 测试 ── */}
-      <div style={guideCard}>
-        <div style={{ fontSize: 11, fontWeight: 700, color: C.label }}>LLM API 连通性测试</div >
-        <div style={{ fontSize: 9.5, color: C.third, marginTop: 3, lineHeight: 1.35 }}>测试 API 是否正常工作及端点延迟。</div >
-        <div onClick={onTestApi} style={{ ...guideBtn, background: testStatus?.status === "testing" ? C.amber : (testStatus?.status === "ok" ? C.green : C.blue) }}>
-          {testStatus?.status === "testing" ? "测试中..." : (testStatus?.status === "ok" ? "测试成功" : "开始测试")}
-        </div >
-        {testStatus && <div style={{ fontSize: 8, color: C.second, marginTop: 4 }}>{testStatus.message}</div >}
+        <div style={{ fontSize: 9.5, color: C.third, marginTop: 3, lineHeight: 1.35 }}>AI 模型在设置页的「AI 健康建议」段配置，可在页内直接测延迟。</div >
+        <div onClick={() => { tauriAvailable() ? invoke("open_setup_wizard_cmd").catch(() => {}) : openExternal(AI_SETUP_URL); }} style={guideBtn}>在浏览器中设置 →</div >
+        {apiTestRow(onTestApi, testStatus)}
       </div >
 
       {/* ── 表情跟随鼠标 ── */}
@@ -469,7 +464,7 @@ function Widget({ data, settings, onRefresh, onReset, justResetAt, sedPopRef, dn
         {ICO.chair}<span>{effIdle} min</span>
       </div>
       {effSed && effIdle != null && (
-        <div ref={function (el) { sedPopRef.current = el; }} style={{ position: "absolute", top: "calc(100% + 8px)", left: "50%", marginLeft: -93, width: 186, zIndex: 50, borderRadius: 12, padding: "9px 11px 8px", background: "rgba(38,30,18,0.92)", backdropFilter: "blur(20px)", WebkitBackdropFilter: "blur(20px)", border: "1px solid rgba(255,159,10,0.45)", display: showSedPop ? "block" : "none", animation: "sed-pop .4s cubic-bezier(.2,.9,.3,1.15)" }}>
+        <div ref={function (el) { sedPopRef.current = el; }} style={{ position: "absolute", top: "calc(100% + 18px)", left: "50%", marginLeft: -93, width: 186, boxSizing: "border-box", zIndex: 50, borderRadius: 12, padding: "9px 11px 8px", background: "rgba(38,30,18,0.92)", backdropFilter: "blur(20px)", WebkitBackdropFilter: "blur(20px)", border: "1px solid rgba(255,159,10,0.45)", display: showSedPop ? "block" : "none", animation: "sed-pop .4s cubic-bezier(.2,.9,.3,1.15)" }}>
           <div style={{ position: "absolute", top: -4.5, left: "50%", marginLeft: -4.5, width: 9, height: 9, background: "rgba(38,30,18,0.92)", borderLeft: "1px solid rgba(255,159,10,0.45)", borderTop: "1px solid rgba(255,159,10,0.45)", transform: "rotate(45deg)" }} />
           <div style={{ fontSize: 10.5, fontWeight: 700, color: "#FF9F0A", letterSpacing: 0.2, display: "flex", alignItems: "center", gap: 5 }}>
             {ICO.chair}<span>{T("sedentaryMin", { m: idleMin })}</span>
@@ -485,7 +480,18 @@ function Widget({ data, settings, onRefresh, onReset, justResetAt, sedPopRef, dn
   ) : null;
 
   const header = (
-    <div data-tauri-drag-region style={{ display: "flex", alignItems: "center", gap: 9, padding: "0 2px", cursor: "grab" }}>
+    <div
+      onMouseDown={function (e) {
+        if (e.button !== 0) return; // 仅左键触发拖动
+        const t = e.target;
+        // 排除可交互子控件（情绪球 iframe / 刷新按钮 / 久坐芯片），这些要响应自身点击
+        if (t && t.closest && (t.closest('[data-tauri-drag-region="false"]') || t.closest("iframe"))) return;
+        if (tauriAvailable()) {
+          getCurrentWindow().startDragging().catch(function () {});
+        }
+      }}
+      style={{ display: "flex", alignItems: "center", gap: 9, padding: "0 2px", cursor: "grab" }}
+    >
       <svg width="18" height="18" viewBox="0 0 18 18" style={{ display: "block", flexShrink: 0 }}>
         <g transform="translate(9,9) rotate(-90)" fill="none" strokeLinecap="round">
           <circle r="7.3" stroke="#FF375F" strokeWidth="1.7" strokeDasharray="45.87" strokeDashoffset="5.5" />
@@ -510,17 +516,15 @@ function Widget({ data, settings, onRefresh, onReset, justResetAt, sedPopRef, dn
     height: "100%",
     boxSizing: "border-box",
     padding: "12px 14px",
-    borderRadius: "28px",
-    clipPath: SQUIRCLE,
-    WebkitClipPath: SQUIRCLE,
+    // 圆角统一 36px：与系统 NSVisualEffectView 的 setCornerRadius(36) 完全一致，
+    // 四角边界对齐，磨砂层与内容容器不露边（之前超椭圆 clipPath 与系统正圆角不重合）
+    borderRadius: "36px",
     display: "flex",
     flexDirection: "column",
-    // 玻璃模糊由系统 NSVisualEffectView 提供；前端叠极薄底色透出系统玻璃
+    // 玻璃模糊由系统 NSVisualEffectView 提供；前端只叠极薄 tint 透出系统玻璃。
+    // 不再叠 CSS backdrop-filter：透明 WKWebView 上 backdrop-filter 是 macOS 已知
+    // 白屏/闪烁风险（配合每 5s 重绘 + iframe 动画时尤其明显），去掉后磨砂观感不变。
     background: C.bg,
-    // CSS 模糊叠加系统 vibrancy：WKWebView 透明后 backdrop-filter 模糊窗口后内容，
-    // 与 Popover 磨砂叠加出真正的液态玻璃质感
-    backdropFilter: "blur(18px) saturate(1.3)",
-    WebkitBackdropFilter: "blur(18px) saturate(1.3)",
     // 顶部亮棱（受光）+ 底部暗收口，无四向棱线（圆角处交叠出暗角）也无外投影（透明窗口裁直角）
     boxShadow: "inset 0 1px 0 " + C.rim + ", inset 0 -0.5px 0 rgba(0,0,0,0.16)",
     overflow: "hidden",
@@ -740,6 +744,7 @@ export default function App() {
   const [saveBusy, setSaveBusy] = useState(false);
   const [systemDark, setSystemDark] = useState(true);
   const [testAiStatus, setTestAiStatus] = useState(null); // { status: 'idle'|'testing'|'ok'|'error', message: string }
+  const [testDataStatus, setTestDataStatus] = useState(null); // 数据 API（Google 健康）测试状态
   const [, forceTick] = useState(0);
 
   const sedPopRef = useRef(null);
@@ -782,6 +787,22 @@ export default function App() {
       setTestAiStatus({ status: 'ok', message: T("testLlmOk", { ms: latency }) });
     } catch (e) {
       setTestAiStatus({ status: 'error', message: T("testLlmFail", { e: e.message || "unknown" }) });
+    }
+  }, []);
+
+  // 数据 API（Google 健康）延迟测试：走 Rust test_data_api → python --ping
+  const handleTestDataApi = useCallback(async () => {
+    setTestDataStatus({ status: 'testing', message: T("testDataTesting") });
+    try {
+      const raw = await invoke("test_data_api");
+      const r = typeof raw === "string" ? JSON.parse(raw) : raw;
+      if (r && r.ok) {
+        setTestDataStatus({ status: 'ok', message: T("testDataOk", { ms: r.ms }) + (r.detail ? " · " + r.detail : "") });
+      } else {
+        setTestDataStatus({ status: 'error', message: T("testDataFail", { e: (r && r.detail) || "unknown" }) });
+      }
+    } catch (e) {
+      setTestDataStatus({ status: 'error', message: T("testDataFail", { e: e.message || "unknown" }) });
     }
   }, []);
 
@@ -837,9 +858,15 @@ export default function App() {
           lastAiTryRef.current = now;
           const silent = !!aiTipRef.current;
           if (!silent) setAiThinking(true);
-          const tip = await genAiTip(parsed, s, parsed.rolling_averages);
-          aiBusyRef.current = false;
-          if (!silent) setAiThinking(false);
+          let tip = null;
+          try {
+            tip = await genAiTip(parsed, s, parsed.rolling_averages);
+          } catch (e) {
+            console.warn("ai tip failed", e);
+          } finally {
+            aiBusyRef.current = false;
+            if (!silent) setAiThinking(false);
+          }
           if (tip) { aiTipRef.current = tip; setAiTip(tip); }
         } else if (!s || !s.llm_base_url) {
           setAiThinking(false);
@@ -884,28 +911,9 @@ export default function App() {
     if (tauriAvailable()) {
       try { await invoke("refresh_now"); } catch (e) {}
     }
-    // 轮询等待采集完成（数据签名变化），最多等 120 秒
-    const startMs = Date.now();
-    const poll = () => {
-      if (Date.now() - startMs >= 120000) { document.body.classList.remove("hd-refreshing"); return; }
-      if (tauriAvailable()) {
-        invoke("read_data").then(s => {
-          if (s) {
-            const d = JSON.parse(s);
-            if (d && d.today) {
-              const sig = [d.today.steps, d.today.distance, d.today.calories, d.today.updated_at].join("|");
-              if (beforeSig === null || sig !== beforeSig) {
-                load();
-                document.body.classList.remove("hd-refreshing");
-                return;
-              }
-            }
-          }
-        }).catch(() => {});
-      }
-      setTimeout(poll, 3000);
-    };
-    setTimeout(poll, 3000);
+    // 即时反馈：3s 后撤掉旋转动画（refresh_now 是非阻塞的，UI 不该再"假死"；
+    // 真正的数据更新由后台 5s 自动轮询接管，不再阻塞 UI 等到 Python 写完）
+    setTimeout(() => document.body.classList.remove("hd-refreshing"), 3000);
   }, [load, data]);
 
   const onReset = useCallback(async () => {
@@ -1044,7 +1052,7 @@ export default function App() {
           setForceWidgetPop={setForceWidgetPop}
         />
       ) : (
-        <div style={{ width: "100%", height: "100%", display: "flex", alignItems: "center", justifyContent: "center", color: "rgba(255,255,255,0.5)", fontSize: 12 }}>
+        <div style={{ width: "100%", height: "100%", display: "flex", alignItems: "center", justifyContent: "center", color: C.third, fontSize: 12 }}>
           {T("loading")}
         </div>
       )}
@@ -1059,6 +1067,8 @@ export default function App() {
           systemDark={systemDark}
           onTestApi={handleTestApi}
           testStatus={testAiStatus}
+          onTestDataApi={handleTestDataApi}
+          testDataStatus={testDataStatus}
         />
       )}
     </div>

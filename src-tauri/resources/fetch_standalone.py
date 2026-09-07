@@ -24,12 +24,16 @@ def _detect_proxy():
 
 PROXY_ARGS = _detect_proxy()
 
+# --ping 模式下静默：日志走 stderr，避免污染 stdout 上的 JSON 结果
+_QUIET = False
+
 # ── 命令行参数（Tauri 跨平台：路径由 Rust 传入）──
 _ARGV = argparse.ArgumentParser()
 _ARGV.add_argument("--out",    default=os.path.expanduser("~/google-health-dashboard/data.js"))
 _ARGV.add_argument("--token",  default=os.path.expanduser("~/.google-health-mcp/tokens.json"))
 _ARGV.add_argument("--config", default=os.path.expanduser("~/.google-health-mcp/config.json"))
 _ARGV.add_argument("--once",   action="store_true")
+_ARGV.add_argument("--ping",   action="store_true", help="轻量探测：只测 API 连通与延迟，输出 JSON，不采集数据")
 _ARGV.add_argument("--loop",   action="store_true")
 _ARGV.add_argument("--sed-min",    type=int, default=45, help="连续不动超过此时长(分钟)判定久坐")
 _ARGV.add_argument("--remind-min", type=int, default=30, help="久坐后每隔多久复查提醒一次(分钟)")
@@ -248,7 +252,11 @@ def fetch_azm(today):
     return fat, card, peak
 
 def fetch_sleep():
-    """取最新一条夜间睡眠（STAGES 类型）"""
+    """取最近一次夜间睡眠（STAGES 类型）。
+    关键校验：醒来时间（本地日期）必须等于今天，才作为「昨晚的睡眠」返回；
+    否则说明昨晚未佩戴 / 无新睡眠，返回 None（前端显示无睡眠），
+    避免把前几天旧睡眠原样带过来造成「睡眠不更新」的假象。"""
+    today_date = datetime.now().date()
     d = api_get("users/me/dataTypes/sleep/dataPoints:reconcile?pageSize=10")
     for p in d.get("dataPoints", []):
         sl = p.get("sleep", {})
@@ -260,6 +268,10 @@ def fetch_sleep():
         en_raw = datetime.fromisoformat(iv.get("endTime",   "").replace("Z", "+00:00"))
         st_local = st_raw + timedelta(seconds=offset)
         en_local = en_raw + timedelta(seconds=offset)
+        # 醒来日期非今天 → 这是前几天的旧睡眠，跳过（不返回给今天）
+        if en_local.date() != today_date:
+            log(f"  ⏭️  跳过旧睡眠记录（醒来 {en_local.strftime('%Y-%m-%d %H:%M')}，非今日），昨晚可能未佩戴")
+            continue
         total_min = int((en_local - st_local).total_seconds() / 60)
         deep = rem = light = awake = 0
         for stage in sl.get("stages", []):
@@ -837,6 +849,10 @@ def generate_tip(steps, azm, sleep_total, deep, rem, resting_hr, hrv, spo2, resp
 # ─── 日志 / 主流程 ────────────────────────────────────────────────────────────
 
 def log(msg):
+    # --ping 时 stdout 要保持纯净（只输出 JSON），日志改走 stderr
+    if _QUIET:
+        print(f"[{datetime.now().strftime('%H:%M:%S')}] {msg}", flush=True, file=sys.stderr)
+        return
     print(f"[{datetime.now().strftime('%H:%M:%S')}] {msg}", flush=True)
 
 def main():
@@ -1000,8 +1016,57 @@ def main():
     log(f"✅ data.json 已写入 ({today})")
     print("DASHBOARD_UPDATE_OK")
 
+def ping():
+    """轻量探测 Google Health API（供设置面板「数据 API 延迟测试」用）。
+    stdout 只输出一行 JSON：{"ok":bool,"ms":int,"detail":str}。
+    不做全量采集，只打一次 dataSources 列表端点（最轻的请求）。
+    """
+    res = {"ok": False, "ms": 0, "detail": ""}
+    try:
+        tok = load_token()
+    except FileNotFoundError:
+        res["detail"] = "未找到凭证文件（需先在浏览器完成 Google 授权）"
+        print(json.dumps(res, ensure_ascii=False)); return
+    except Exception as e:
+        res["detail"] = f"读取凭证失败: {e}"
+        print(json.dumps(res, ensure_ascii=False)); return
+    if not tok:
+        res["detail"] = "凭证无效或刷新失败（需重新授权）"
+        print(json.dumps(res, ensure_ascii=False)); return
+
+    t0 = time.time()
+    try:
+        # 直连时显式 --noproxy '*'，避免继承 GUI 进程的 HTTP_PROXY 环境变量：
+        # 本机对 Google Health 直连才是通的，走代理反而空响应。检测到 7890 代理才走代理。
+        _curl_proxy = list(PROXY_ARGS) + (["--noproxy", "*"] if not PROXY_ARGS else [])
+        r = subprocess.run([
+            "curl", "-s", "-o", "/dev/null", "-w", "%{http_code}", *_curl_proxy,
+            "--connect-timeout", "5", "--max-time", "15",
+            "-H", f"Authorization: Bearer {tok}",
+            "https://health.googleapis.com/v4/users/me/dataTypes/steps/dataPoints:reconcile?pageSize=1",
+        ], capture_output=True, text=True, timeout=20)
+        res["ms"] = int((time.time() - t0) * 1000)
+        code = (r.stdout or "").strip()
+        if code == "200":
+            res["ok"] = True
+            res["detail"] = "HTTP 200 · 凭证有效"
+        elif code == "401" or code == "403":
+            res["detail"] = f"HTTP {code} · 凭证被拒绝（需重新授权）"
+        else:
+            res["detail"] = f"HTTP {code or '无响应'}"
+    except subprocess.TimeoutExpired:
+        res["ms"] = int((time.time() - t0) * 1000)
+        res["detail"] = "请求超时 (>15s)"
+    except Exception as e:
+        res["ms"] = int((time.time() - t0) * 1000)
+        res["detail"] = str(e)
+    print(json.dumps(res, ensure_ascii=False))
+
 if __name__ == "__main__":
-    if _ARGS.loop:
+    if _ARGS.ping:
+        _QUIET = True
+        ping()
+    elif _ARGS.loop:
         while True:
             try:
                 main()

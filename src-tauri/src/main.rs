@@ -746,16 +746,33 @@ fn refresh_now(app: AppHandle) -> Result<(), String> {
 /// （如方舟 coding 端点的 allow-headers 不含 Authorization），改由 Rust 侧
 /// 用系统 curl 发请求，无 CORS 限制。messages 为 JSON 数组字符串。
 #[tauri::command]
-fn ai_chat(
+async fn ai_chat(
     base_url: String,
     api_key: String,
     model: String,
     messages: String,
     max_tokens: u32,
 ) -> Result<String, String> {
+    // 关键：同步 command 默认跑在 Tauri 主线程，curl 阻塞最长 20s 会把主线程卡死，
+    // 表现为「点刷新后 UI 假死 + 透明窗口白屏」。改成 async + spawn_blocking，
+    // 把阻塞的 curl 丢到专用线程池，主线程立即返回，UI 不再被卡住。
+    tauri::async_runtime::spawn_blocking(move || {
+        ai_chat_blocking(&base_url, &api_key, &model, &messages, max_tokens)
+    })
+    .await
+    .map_err(|e| format!("task join error: {}", e))?
+}
+
+fn ai_chat_blocking(
+    base_url: &str,
+    api_key: &str,
+    model: &str,
+    messages: &str,
+    max_tokens: u32,
+) -> Result<String, String> {
     let url = format!("{}/chat/completions", base_url.trim_end_matches('/'));
     let msgs: serde_json::Value =
-        serde_json::from_str(&messages).map_err(|e| format!("messages JSON 无效: {}", e))?;
+        serde_json::from_str(messages).map_err(|e| format!("messages JSON 无效: {}", e))?;
     let body = serde_json::json!({
         "model": model,
         "messages": msgs,
@@ -766,8 +783,14 @@ fn ai_chat(
 
     let out = std::process::Command::new("curl")
         .arg("-s")
+        .arg("--connect-timeout")
+        .arg("5")
         .arg("--max-time")
         .arg("20")
+        // 强制直连：GUI 进程可能继承 HTTP_PROXY 环境变量，而本机对 Ark/Google
+        // 直连才是通的（走代理反而拿不到响应）。延迟测试与日常 AI 调用都走这里。
+        .arg("--noproxy")
+        .arg("*")
         .arg("-X")
         .arg("POST")
         .arg(&url)
@@ -802,6 +825,79 @@ fn refresh_data(app: &AppHandle) {
         };
         let _ = run_fetch_once(&py, &data, &tok, &cfg, sed_min, remind_min);
     });
+}
+
+/// 探测 Google Health API（设置面板「数据 API」延迟测试用）。
+/// 复用采集脚本的 token 刷新逻辑，只打一次轻量请求，返回 JSON：
+/// {"ok":bool,"ms":int,"detail":str}
+/// 必须 async + spawn_blocking：同步 command 跑在主线程，网络阻塞会导致界面假死/白屏。
+#[tauri::command]
+async fn test_data_api(app: AppHandle) -> Result<String, String> {
+    // 同步 command 会卡主线程（curl 阻塞 20s 那次白屏的教训），必须 spawn_blocking
+    tauri::async_runtime::spawn_blocking(move || data_api_ping_blocking(&app))
+        .await
+        .map_err(|e| format!("任务执行失败: {}", e))?
+}
+
+/// 数据 API 探测（同步版）。供 Tauri command 与 setup 网页 HTTP 端点共用。
+/// 注意：只能在非主线程调用（HTTP handler 跑在独立线程，安全；command 侧用 spawn_blocking 包一层）。
+fn data_api_ping_blocking(app: &AppHandle) -> Result<String, String> {
+    let (py, _data, tok, cfg) = paths(app);
+    let out = std::process::Command::new("python3")
+        .arg(py)
+        .arg("--ping")
+        .arg("--token")
+        .arg(tok)
+        .arg("--config")
+        .arg(cfg)
+        .output()
+        .map_err(|e| format!("启动 python 失败: {}", e))?;
+    let stdout = String::from_utf8_lossy(&out.stdout).to_string();
+    // --ping 下脚本日志走 stderr，stdout 只应有结果行；取最后一个 JSON 行以防万一
+    let line = stdout
+        .lines()
+        .rev()
+        .find(|l| l.trim_start().starts_with('{'))
+        .unwrap_or("")
+        .to_string();
+    if line.is_empty() {
+        let stderr = String::from_utf8_lossy(&out.stderr).to_string();
+        let last = stderr
+            .lines()
+            .filter(|l| !l.trim().is_empty())
+            .last()
+            .unwrap_or("未知错误")
+            .to_string();
+        return Err(if last.is_empty() { "无响应".to_string() } else { last });
+    }
+    Ok(line)
+}
+
+/// LLM API 探测：发一条最小请求，测连通性与往返延迟，返回 {ok, ms, detail}
+fn llm_api_ping_blocking(base_url: &str, api_key: &str, model: &str) -> String {
+    if base_url.trim().is_empty() || api_key.trim().is_empty() {
+        return serde_json::json!({"ok": false, "ms": 0, "detail": "未填写 Base URL 或 API Key"}).to_string();
+    }
+    let model = if model.trim().is_empty() { "gpt-4o-mini" } else { model };
+    let msgs = r#"[{"role":"user","content":"hi"}]"#;
+    let t0 = std::time::Instant::now();
+    let res = ai_chat_blocking(base_url, api_key, model, msgs, 16);
+    let ms = t0.elapsed().as_millis();
+    match res {
+        Ok(resp) => {
+            let ok = serde_json::from_str::<serde_json::Value>(&resp)
+                .ok()
+                .and_then(|v| v.get("choices").and_then(|c| c.as_array()).map(|a| !a.is_empty()))
+                .unwrap_or(false);
+            if ok {
+                serde_json::json!({"ok": true, "ms": ms, "detail": "HTTP 200 · 模型响应正常"}).to_string()
+            } else {
+                let snippet: String = resp.chars().take(140).collect();
+                serde_json::json!({"ok": false, "ms": ms, "detail": format!("返回异常：{}", snippet)}).to_string()
+            }
+        }
+        Err(e) => serde_json::json!({"ok": false, "ms": ms, "detail": e}).to_string(),
+    }
 }
 
 #[tauri::command]
@@ -965,13 +1061,26 @@ fn displays_full() -> Vec<Disp> {
     unsafe {
         let screens: *mut Object = msg_send![class!(NSScreen), screens];
         let count: usize = msg_send![screens, count];
-        let primary: *mut Object = msg_send![class!(NSScreen), mainScreen];
-        let pf: NSRect = msg_send![primary, frame];
-        let primary_hash: i32 = msg_send![primary, hash];
-        let mut arr = Vec::new();
+
+        // 先收集所有屏幕 frame，再找主屏。
+        // 关键：不能用 NSScreen.mainScreen——本 app 是 Accessory 激活策略（不在 Dock），
+        // 此时 mainScreen 会错误返回副屏（实测返回竖屏副屏而非真正主屏），导致 is_primary 标错、
+        // 启动居中等依赖主屏的逻辑全部算到副屏。macOS 约定：主显示器左下角恒为全局 CG 原点 (0,0)，
+        // 据此判断主屏最可靠。
+        let mut items: Vec<(*mut Object, NSRect)> = Vec::new();
         for i in 0..count {
             let s: *mut Object = msg_send![screens, objectAtIndex: i];
             let f: NSRect = msg_send![s, frame];
+            items.push((s, f));
+        }
+        let pf = items
+            .iter()
+            .map(|(_, f)| *f)
+            .find(|f| f.origin.x.abs() < 0.5 && f.origin.y.abs() < 0.5)
+            .unwrap_or(items[0].1);
+
+        let mut arr = Vec::new();
+        for (s, f) in items {
             let name: *mut Object = msg_send![s, localizedName];
             let name_str = if !name.is_null() {
                 let cstr: *const c_char = msg_send![name, UTF8String];
@@ -982,10 +1091,11 @@ fn displays_full() -> Vec<Disp> {
             let hid: i32 = msg_send![s, hash];
             // Tauri y 由 CG（Y 向上）翻转得到，与 collect_displays 历史实现一致
             let ty = pf.origin.y + pf.size.height - (f.origin.y + f.size.height);
+            let is_primary = f.origin.x.abs() < 0.5 && f.origin.y.abs() < 0.5;
             arr.push(Disp {
                 id: hid,
                 name: name_str,
-                is_primary: hid == primary_hash,
+                is_primary,
                 x: f.origin.x,
                 y: ty,
                 w: f.size.width,
@@ -1204,6 +1314,15 @@ fn open_external(url: String) -> Result<(), String> {
     Ok(())
 }
 
+/// 打开本地设置向导网页：起 127.0.0.1:18911 服务 + 浏览器打开。
+/// 之前 app 内按钮直接 openExternal 到 GitHub README，用户点了根本看不到配置页——
+/// 真正的配置页是这个本地服务提供的 setup.html，必须走这里。
+#[tauri::command]
+fn open_setup_wizard_cmd(app: AppHandle) -> Result<(), String> {
+    ensure_setup_server(app.clone());
+    open_external(format!("http://127.0.0.1:{}/setup", SETUP_SERVER_PORT))
+}
+
 // ── 设置向导：本地 HTTP 服务（浏览器填写并保存，回写 App）────────────────────
 const SETUP_SERVER_PORT: u16 = 18911;
 static SETUP_SERVER_STARTED: OnceLock<()> = OnceLock::new();
@@ -1276,6 +1395,24 @@ fn handle_setup_conn(mut stream: TcpStream, app: &AppHandle) {
         });
         let j = serde_json::to_string(&out).unwrap_or_else(|_| " {}".to_string());
         send_http(&mut stream, 200, "application/json; charset=utf-8", j.as_bytes());
+    } else if method == "POST" && path.starts_with("/api/test-llm") {
+        // 延迟测试：优先用页面当前输入的值（未保存也能测），缺失时回落到已保存设置
+        let v: serde_json::Value = serde_json::from_slice(&body).unwrap_or(serde_json::json!({}));
+        let s = load_settings(app);
+        let base_url = v.get("base_url").and_then(|x| x.as_str())
+            .filter(|x| !x.trim().is_empty()).unwrap_or(&s.llm_base_url).to_string();
+        let api_key = v.get("api_key").and_then(|x| x.as_str())
+            .filter(|x| !x.trim().is_empty()).unwrap_or(&s.llm_api_key).to_string();
+        let model = v.get("model").and_then(|x| x.as_str())
+            .filter(|x| !x.trim().is_empty()).unwrap_or(&s.llm_model).to_string();
+        let resp = llm_api_ping_blocking(&base_url, &api_key, &model);
+        send_http(&mut stream, 200, "application/json; charset=utf-8", resp.as_bytes());
+    } else if method == "POST" && path.starts_with("/api/test-data") {
+        let resp = match data_api_ping_blocking(app) {
+            Ok(j) => j,
+            Err(e) => serde_json::json!({"ok": false, "ms": 0, "detail": e}).to_string(),
+        };
+        send_http(&mut stream, 200, "application/json; charset=utf-8", resp.as_bytes());
     } else if path.starts_with("/setup") || path == "/" || path.starts_with("/index") {
         let html = load_setup_html(app);
         send_http(&mut stream, 200, "text/html; charset=utf-8", html.as_bytes());
@@ -1454,12 +1591,45 @@ fn main() {
                     let style: u64 = msg_send![ns, styleMask];
                     let _: () = msg_send![ns, setStyleMask: style | 128u64];
 
+                    // contentView 的实际尺寸（WKWebView 在 transparent 模式下 bounds 可能为 0，故取 contentView）
+                    let frame: NSRect = msg_send![content_view, frame];
+
+                    // ── 背景玻璃：macOS 26+ 用真·液态玻璃 NSGlassEffectView，旧系统回退 NSVisualEffectView ──
+                    let glass_cls: Option<&objc::runtime::Class> =
+                        objc::runtime::Class::get("NSGlassEffectView");
+                    let mut used_glass = false;
+                    if let (Some(gcls), Ok(wv_ptr)) = (glass_cls, win.ns_view()) {
+                        // Apple Liquid Glass：把整个 webview 作为 contentView 嵌进玻璃，
+                        // 由系统负责折射/高光/边缘镜面，并按 cornerRadius 裁剪内容。
+                        // 0 = Regular（标准液态玻璃，高光与折射明显）
+                        // 1 = Clear（清玻璃，更通透、高光更弱）
+                        let _wv = wv_ptr as *mut Object; // 仅校验 webview 句柄可用，不移动它
+                        let glass: *mut Object = msg_send![gcls, alloc];
+                        let glass: *mut Object = msg_send![glass, initWithFrame: frame];
+                        // 0 = Regular（标准液态玻璃，高光/折射明显，但浅色外观下底偏白）
+                        // 1 = Clear（清玻璃，更通透、底更薄）—— 浅色外观下用 Clear 避免"白底"
+                        let _: () = msg_send![glass, setStyle: 1i64];
+                        let _: () = msg_send![glass, setCornerRadius: 36.0f64];
+                        let _: () = msg_send![glass, setAutoresizingMask: 18u64];
+                        // 液态玻璃默认带阴影来表现层次，但阴影轮廓是**矩形**（cornerRadius 只裁剪
+                        // 玻璃本身的绘制，不改变 shadow 形状）→ 四角会露出方形投影。用户明确不要阴影，关掉。
+                        let _: () = msg_send![glass, setWantsLayer: YES_BOOL];
+                        let glass_layer: *mut Object = msg_send![glass, layer];
+                        let _: () = msg_send![glass_layer, setShadowOpacity: 0.0f32];
+                        // 只作背景层插入（与原 NSVisualEffectView 完全相同的挂载方式）。
+                        // 不把 webview 嵌进 contentView —— 那种用法在 desktop-level 透明窗口
+                        // 上会触发 AppKit 无限合成递归（实测 addSubview 直接爆栈）。
+                        // 玻璃在底层提供模糊/高光/折射，webview 透明叠在其上显示内容。
+                        let null_obj: *mut Object = std::ptr::null_mut();
+                        let _: () = msg_send![content_view, addSubview: glass positioned: -1i64 relativeTo: null_obj];
+                        used_glass = true;
+                    }
+                    if !used_glass {
                     // 系统原生磨砂玻璃：直接用 objc 建 NSVisualEffectView（绕过 window-vibrancy crate）
                     // 原因 1：window-vibrancy 用 view.bounds() 创建，WKWebView 在 transparent 模式下初始为 0，
                     //         vibrancy view 不自动撑大，露出下方 ~50px 灰色带（用户截图反馈"底部阴影"）
                     // 原因 2：state 设 Active，点击小组件触发窗口激活后整个 vibrancy 变深（用户反馈"点击变黑"）
                     // 解决：手动拿 contentView.frame 建 vibrancy view；state 锁定 Inactive 让小组件视觉稳定
-                    let frame: NSRect = msg_send![content_view, frame];
                     // NSVisualEffectView
                     let cls = class!(NSVisualEffectView);
                     let vibrancy: *mut Object = msg_send![cls, alloc];
@@ -1481,6 +1651,7 @@ fn main() {
                     // 加到 contentView 下方（NSWindowBelow = -1）
                     let null_obj: *mut Object = std::ptr::null_mut();
                     let _: () = msg_send![content_view, addSubview: vibrancy positioned: -1i64 relativeTo: null_obj];
+                    }
                 }
                 // vibrancy 挂载后再清理一次窗口阴影
                 disable_window_shadow(&win);
@@ -1500,9 +1671,31 @@ fn main() {
                 let _ = win.set_background_color(Some(tauri::webview::Color(0, 0, 0, 0)));
             }
 
-            // 跨平台：应用上次保存的位置
+            // 启动定位：主屏居中（每次启动都居中，方便用户一眼找到并拖动）
             if let Some(win) = app.get_webview_window("main") {
-                let _ = win.set_position(tauri::PhysicalPosition::new(settings.pos_x, settings.pos_y));
+                #[cfg(target_os = "macos")]
+                {
+                    let center = displays_full()
+                        .into_iter()
+                        .find(|d| d.is_primary)
+                        .or_else(|| displays_full().into_iter().next());
+                    if let Some(d) = center {
+                        let cx = d.x + (d.w - 344.0) / 2.0;
+                        let cy = d.y + (d.h - 272.0) / 2.0;
+                        let _ = win.set_position(tauri::LogicalPosition::new(cx, cy));
+                    }
+                }
+                #[cfg(not(target_os = "macos"))]
+                {
+                    if let Ok(Some(monitor)) = win.primary_monitor() {
+                        let pos = monitor.position();
+                        let size = monitor.size();
+                        let scale = win.scale_factor().unwrap_or(1.0);
+                        let cx = pos.x as f64 / scale + (size.width as f64 / scale - 344.0) / 2.0;
+                        let cy = pos.y as f64 / scale + (size.height as f64 / scale - 272.0) / 2.0;
+                        let _ = win.set_position(tauri::LogicalPosition::new(cx, cy));
+                    }
+                }
 
                 // 拖拽移动后保存新位置（debounce 600ms，避免拖拽中频繁写盘；clamp 防止移出屏幕）
                 let app_handle = app.handle().clone();
@@ -1672,7 +1865,8 @@ fn main() {
             });
 
             // 常驻采集线程（间隔来自 settings，可被 save_settings 热更新）
-            let handle = app.handle().clone();
+            let setup_handle = app.handle().clone();
+            let handle = setup_handle.clone();
             std::thread::spawn(move || loop {
                 let (py, data, tok, cfg) = paths(&handle);
                 // 久坐阈值/提醒间隔每次采集前读最新设置，改设置立即生效
@@ -1695,12 +1889,19 @@ fn main() {
             // 应用自启设置
             let _ = set_autostart(settings.autostart);
 
+            // 启动即常驻本地向导服务（仅监听 127.0.0.1）：
+            // 之前是点「设置向导」才临时起，首次点击要等服务就绪，且外部无法预检。
+            // 常驻后：网页内两个延迟测试随时可用，点击也无需等待。
+            ensure_setup_server(setup_handle.clone());
+
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
             read_data,
             refresh_now,
             ai_chat,
+            test_data_api,
+            open_setup_wizard_cmd,
             reset_sedentary,
             snooze_sedentary,
             get_settings,
