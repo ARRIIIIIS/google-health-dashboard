@@ -44,6 +44,8 @@ struct Settings {
     display: i32,    // 兼容：上次选中的 primary display id
     pos_x: i32,
     pos_y: i32,
+    /// 用户是否手动摆放过小组件。false = 从未摆放（启动时居中），true = 恢复上次位置
+    pos_saved: bool,
     respect_dnd: bool, // 勿扰时是否抑制久坐提醒
     widget_visible: bool, // 小组件主窗口是否显示
     sedentary_min: u64, // 连续不动超过此时长(分钟)判定久坐
@@ -70,6 +72,7 @@ impl Default for Settings {
             display: -1,
             pos_x: 20,
             pos_y: 60,
+            pos_saved: false,
             respect_dnd: true,
             widget_visible: true,
             sedentary_min: 45,
@@ -446,7 +449,8 @@ fn sync_main_widget(app: &AppHandle, s: &Settings) {
                 disable_window_shadow(&win);
             }
             let (cx, cy) = clamp_to_screens(s.pos_x, s.pos_y, &collect_displays(), 344, 272);
-            let _ = win.set_position(tauri::PhysicalPosition::new(cx, cy));
+            // pos_x/pos_y 是逻辑点，必须用 LogicalPosition（用 PhysicalPosition 会在 Retina 上再除一次 scale）
+            let _ = win.set_position(tauri::LogicalPosition::new(cx as f64, cy as f64));
             // 保存修正后的坐标
             if cx != s.pos_x || cy != s.pos_y {
                 let sh = app.state::<SettingsHandle>();
@@ -1155,8 +1159,11 @@ fn save_settings(app: AppHandle, json: String) -> Result<(), String> {
     if let Some(state) = app.try_state::<RefreshState>() {
         *state.0.lock().unwrap() = s.refresh_interval_min.max(1) * 60;
     }
-    if let Some(win) = app.get_webview_window("main") {
-        let _ = win.set_position(tauri::PhysicalPosition::new(s.pos_x, s.pos_y));
+    // 仅在用户摆放过位置时才复位：否则会把小组件甩回默认的 (20, 60)
+    if s.pos_saved {
+        if let Some(win) = app.get_webview_window("main") {
+            let _ = win.set_position(tauri::LogicalPosition::new(s.pos_x as f64, s.pos_y as f64));
+        }
     }
     set_autostart(s.autostart).map_err(|e| e.to_string())?;
     rebuild_tray_menu(&app);
@@ -1842,18 +1849,27 @@ fn main() {
                 let _ = win.set_background_color(Some(tauri::webview::Color(0, 0, 0, 0)));
             }
 
-            // 启动定位：主屏居中（每次启动都居中，方便用户一眼找到并拖动）
+            // 启动定位：用户摆放过就恢复上次位置；从未摆放过才主屏居中（首次启动方便一眼找到）
             if let Some(win) = app.get_webview_window("main") {
                 #[cfg(target_os = "macos")]
                 {
-                    let center = displays_full()
-                        .into_iter()
-                        .find(|d| d.is_primary)
-                        .or_else(|| displays_full().into_iter().next());
-                    if let Some(d) = center {
-                        let cx = d.x + (d.w - 344.0) / 2.0;
-                        let cy = d.y + (d.h - 272.0) / 2.0;
-                        let _ = win.set_position(tauri::LogicalPosition::new(cx, cy));
+                    let s = load_settings(app.handle());
+                    if s.pos_saved {
+                        // pos_x/pos_y 统一为逻辑点：与 Moved 事件（物理像素）经 scale 换算后一致
+                        let (cx, cy) = clamp_to_screens(s.pos_x, s.pos_y, &collect_displays(), 344, 272);
+                        let _ = win.set_position(tauri::LogicalPosition::new(cx as f64, cy as f64));
+                        eprintln!("[health] 启动定位：恢复上次位置 ({}, {})", cx, cy);
+                    } else {
+                        let center = displays_full()
+                            .into_iter()
+                            .find(|d| d.is_primary)
+                            .or_else(|| displays_full().into_iter().next());
+                        if let Some(d) = center {
+                            let cx = d.x + (d.w - 344.0) / 2.0;
+                            let cy = d.y + (d.h - 272.0) / 2.0;
+                            let _ = win.set_position(tauri::LogicalPosition::new(cx, cy));
+                            eprintln!("[health] 启动定位：首次启动，主屏居中 ({:.0}, {:.0})", cx, cy);
+                        }
                     }
                 }
                 #[cfg(not(target_os = "macos"))]
@@ -1879,11 +1895,22 @@ fn main() {
                             return;
                         }
                         *last = std::time::Instant::now();
+                        // Moved 事件给的是物理像素，统一换算成逻辑点再存（Retina 上 scale=2，
+                        // 否则每次重启位置都会被 scale 除一次，越跑越偏）
+                        let scale = app_handle
+                            .get_webview_window("main")
+                            .and_then(|w| w.scale_factor().ok())
+                            .unwrap_or(1.0)
+                            .max(0.1);
+                        let lx = (pos.x as f64 / scale).round() as i32;
+                        let ly = (pos.y as f64 / scale).round() as i32;
                         let sh = app_handle.state::<SettingsHandle>();
-                        let (cx, cy) = clamp_to_screens(pos.x, pos.y, &collect_displays(), 344, 272);
+                        let (cx, cy) = clamp_to_screens(lx, ly, &collect_displays(), 344, 272);
+                        sh.set("pos_saved", true);
                         sh.set("pos_x", cx);
                         sh.set("pos_y", cy);
                         let _ = save_settings_file(&app_handle, &sh.clone_inner());
+                        eprintln!("[health] 保存窗口位置（逻辑点）: ({}, {})", cx, cy);
                     }
                 });
             }
