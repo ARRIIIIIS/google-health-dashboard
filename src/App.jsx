@@ -466,17 +466,17 @@ function Widget({ data, settings, character, onRefresh, onReset, justResetAt, se
         el.__ballWired = true;
         let tries = 0;
         const setup = function () {
-          const w = el.contentWindow;
-          if (!w || !w.__charReady) { if (tries++ < 50) setTimeout(setup, 100); return; }
+          const cw = el.contentWindow;
+          if (!cw || !cw.__charReady) { if (tries++ < 50) setTimeout(setup, 100); return; }
           try {
-            w.document.addEventListener("click", function () {
-              try { w.__cycleEmotion(); } catch (e) {}
-            });
-            // 表情跟随鼠标：鼠标在窗口内移动时眼睛看过去，移出窗口缓缓回正；
-            // 阈值/距离优先读设置（gaze_threshold/gaze_radius），缺省回退 1.0/80（更灵敏）
+            // 点击换表情的监听已内置到 iframe 文档内（每个新文档自带，srcDoc 重载后不丢失）；
+            // 这里只处理父窗口级的「眼睛跟随鼠标」gaze，且每次都重新取 el.contentWindow，
+            // 避免 srcDoc 重载后 contentWindow 变成已失效的旧窗口引用。
             const clampN = function (v, a, b) { return v < a ? a : (v > b ? b : v); };
             const onMove = function (e) {
               try {
+                const w = el.contentWindow;
+                if (!w || !w.__char) return;
                 const s = settingsRef.current;
                 const R = (s && s.gaze_radius) ? s.gaze_radius : 80;
                 const TH = (s && s.gaze_threshold) ? s.gaze_threshold : 1.0;
@@ -490,7 +490,7 @@ function Widget({ data, settings, character, onRefresh, onReset, justResetAt, se
                 w.__char.setGaze(nx, ny);
               } catch (err) {}
             };
-            const onLeave = function () { try { w.__char.clearGaze(); } catch (err) {} };
+            const onLeave = function () { try { const w = el.contentWindow; if (w && w.__char) w.__char.clearGaze(); } catch (err) {} };
             window.addEventListener("mousemove", onMove);
             document.addEventListener("mouseleave", onLeave);
             window.addEventListener("blur", onLeave);
@@ -1117,7 +1117,7 @@ export default function App() {
     return () => { if (unlisten) unlisten(); };
   }, [systemDark, rerender]);
 
-  // 角色选择 / 随机轮换：菜单设置 character='random' 时每 3 分钟换一个角色
+  // 角色选择 / 随机轮换：菜单设置 character='random' 时在四个角色间随机轮换
   useEffect(() => {
     if (characterPref !== "random") {
       setActiveChar(characterPref || "qiuqiu");

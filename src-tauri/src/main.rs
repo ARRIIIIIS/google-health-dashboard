@@ -251,7 +251,7 @@ fn menu_strings(lang: &str) -> MenuStrings {
             char_nimbo: "Nimbo".into(),
             char_twinkle: "Twinkle".into(),
             char_claw: "Claw".into(),
-            char_random: "Shuffle · every 3 min".into(),
+            char_random: "Shuffle".into(),
             refresh_sub: "Update Interval".into(),
             refresh_5: "5 min".into(),
             refresh_15: "15 min".into(),
@@ -280,7 +280,7 @@ fn menu_strings(lang: &str) -> MenuStrings {
             char_nimbo: "雲宝".into(),
             char_twinkle: "亮亮".into(),
             char_claw: "鉗鉗".into(),
-            char_random: "ランダム · 3分ごと".into(),
+            char_random: "ランダム".into(),
             refresh_sub: "更新間隔".into(),
             refresh_5: "5 分".into(),
             refresh_15: "15 分".into(),
@@ -309,7 +309,7 @@ fn menu_strings(lang: &str) -> MenuStrings {
             char_nimbo: "云宝".into(),
             char_twinkle: "亮亮".into(),
             char_claw: "钳钳".into(),
-            char_random: "随机 · 每 3 分钟换".into(),
+            char_random: "随机".into(),
             refresh_sub: "更新频率".into(),
             refresh_5: "5 分钟".into(),
             refresh_15: "15 分钟".into(),
@@ -361,7 +361,7 @@ fn build_main_menu(app: &AppHandle, s: &Settings) -> tauri::menu::Menu<tauri::Wr
     let char_random  = CheckMenuItem::with_id(app, "char_random",  &m.char_random,  true, s.character == "random",  None::<&str>).unwrap();
     let char_sub = Submenu::with_id_and_items(
         app, "char_menu", &m.character_sub, true,
-        &[&char_qiuqiu, &char_nimbo, &char_twinkle, &char_claw, &char_random]
+        &[&char_random, &char_qiuqiu, &char_nimbo, &char_twinkle, &char_claw]
     ).unwrap();
 
     // ── 主题子菜单 ──
