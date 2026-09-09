@@ -738,6 +738,25 @@ export default function App() {
   const [draft, setDraft] = useState(null);
 
   const [dndActive, setDndActive] = useState(false);
+
+  // 系统勿扰（Focus）实时同步：后端监听 Control Center 广播后推送，无需等下次轮询
+  useEffect(() => {
+    if (!tauriAvailable()) return;
+    let unlisten = null;
+    let disposed = false;
+    import("@tauri-apps/api/event")
+      .then(({ listen }) => listen("dnd-changed", (e) => setDndActive(!!e.payload)))
+      .then((fn) => {
+        if (disposed) fn();
+        else unlisten = fn;
+      })
+      .catch(() => {});
+    return () => {
+      disposed = true;
+      if (unlisten) unlisten();
+    };
+  }, []);
+
   const [forceWidgetPop, setForceWidgetPop] = useState(false);
   const [aiTip, setAiTip] = useState(null);
   const [aiThinking, setAiThinking] = useState(false);

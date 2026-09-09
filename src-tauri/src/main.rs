@@ -10,6 +10,10 @@ use std::ffi::CStr;
 use std::os::raw::c_char;
 use std::path::{Path, PathBuf};
 use std::process::Command;
+#[cfg(target_os = "macos")]
+use std::sync::atomic::{AtomicBool, Ordering};
+#[cfg(target_os = "macos")]
+use std::sync::Once;
 use std::sync::{Arc, Mutex, OnceLock};
 use std::time::Duration;
 use std::net::{TcpListener, TcpStream};
@@ -19,7 +23,7 @@ use serde::{Deserialize, Serialize};
 use tauri::{Emitter, Manager, AppHandle};
 
 #[cfg(target_os = "macos")]
-use objc::runtime::{BOOL, Class, Object};
+use objc::runtime::{BOOL, Class, Object, Sel};
 #[cfg(target_os = "macos")]
 use objc::{class, msg_send, sel, sel_impl};
 #[cfg(target_os = "macos")]
@@ -628,10 +632,45 @@ fn current_appearance_dark() -> bool {
     true
 }
 
-/// 勿扰（Focus / DND）是否开启 —— best-effort
-/// 走私有框架 FocusStatus（社区通用做法）。加载/调用失败则回退 false（提醒照常弹）。
+/// 勿扰（Focus / DND）是否开启
+///
+/// 【为什么要改】旧实现依赖私有框架 `FocusStatus`（`FocusStatusCenter.isActive`）。
+/// macOS 26 (Tahoe) 已移除该框架 —— 实测 `dlopen` 失败、`NSClassFromString` 返回 nil，
+/// 于是恒返回 false：用户开着系统专注模式，久坐提醒照样弹，等于「勿扰不同步」。
+///
+/// 【为什么不用读 DND 数据库】`~/Library/DoNotDisturb/DB/*.json` 确实记录了 Focus 状态，
+/// 但该目录受 TCC 保护，第三方 app 读取需要「完全磁盘访问权限」——桌面小组件不该要这个权限。
+///
+/// 【现方案】监听 NSDistributedNotificationCenter 上 Control Center 广播的
+///   `_NSDoNotDisturbEnabledNotification` / `_NSDoNotDisturbDisabledNotification`。
+/// 无需任何权限，且是实时的（开/关专注模式立刻同步）。
+/// 在尚未收到任何广播前（例如旧系统），退回旧的私有框架探测作为兜底。
 #[cfg(target_os = "macos")]
 fn is_dnd_active() -> bool {
+    if DND_KNOWN.load(Ordering::SeqCst) {
+        DND_ACTIVE.load(Ordering::SeqCst)
+    } else {
+        // 还没收到过广播（比如 app 启动时专注模式已经开着 —— 没有状态变化就不会有广播）。
+        // 尽力读一次 DND 数据库拿初始状态；该目录受 TCC 保护，读不到就静默退回旧探测。
+        dnd_read_db().unwrap_or_else(dnd_legacy_focus_probe)
+    }
+}
+
+/// 读 ~/Library/DoNotDisturb/DB/Assertions.json 判断当前是否有活跃的 Focus 断言。
+/// 受 TCC「完全磁盘访问」保护：没有权限时返回 None（不报错、不弹权限框）。
+#[cfg(target_os = "macos")]
+fn dnd_read_db() -> Option<bool> {
+    let home = std::env::var("HOME").ok()?;
+    let p = std::path::PathBuf::from(home).join("Library/DoNotDisturb/DB/Assertions.json");
+    let s = std::fs::read_to_string(p).ok()?;
+    let v: serde_json::Value = serde_json::from_str(&s).ok()?;
+    let recs = v.get("data")?.get(0)?.get("storeAssertionRecords")?.as_array()?;
+    Some(!recs.is_empty())
+}
+
+/// 旧兜底：私有框架 FocusStatus（macOS 12–15 可用，macOS 26 起该框架已被移除）
+#[cfg(target_os = "macos")]
+fn dnd_legacy_focus_probe() -> bool {
     unsafe {
         let path =
             std::ffi::CString::new("/System/Library/PrivateFrameworks/FocusStatus.framework/FocusStatus")
@@ -646,6 +685,135 @@ fn is_dnd_active() -> bool {
         }
     }
     false
+}
+
+#[cfg(target_os = "macos")]
+static DND_ACTIVE: AtomicBool = AtomicBool::new(false);
+/// 是否已经收到过至少一次系统广播（收到后不再走旧兜底）
+#[cfg(target_os = "macos")]
+static DND_KNOWN: AtomicBool = AtomicBool::new(false);
+#[cfg(target_os = "macos")]
+static DND_START: Once = Once::new();
+#[cfg(target_os = "macos")]
+static DND_HANDLE: OnceLock<AppHandle> = OnceLock::new();
+
+#[cfg(target_os = "macos")]
+fn dnd_set(active: bool) {
+    DND_ACTIVE.store(active, Ordering::SeqCst);
+    DND_KNOWN.store(true, Ordering::SeqCst);
+    eprintln!(
+        "[health] 系统勿扰 → {}",
+        if active { "开启（抑制久坐提醒）" } else { "关闭（恢复提醒）" }
+    );
+    if let Some(h) = DND_HANDLE.get() {
+        let _ = h.emit("dnd-changed", active);
+    }
+}
+
+#[cfg(target_os = "macos")]
+extern "C" fn hd_dnd_enabled(_this: *mut Object, _cmd: Sel, _note: *mut Object) {
+    dnd_set(true);
+}
+#[cfg(target_os = "macos")]
+extern "C" fn hd_dnd_disabled(_this: *mut Object, _cmd: Sel, _note: *mut Object) {
+    dnd_set(false);
+}
+
+/// 构造 NSString（不释放，进程生命周期内常驻，仅用于注册观察者时的一次性名称）
+#[cfg(target_os = "macos")]
+fn ns_string(s: &str) -> *mut Object {
+    unsafe {
+        let cs = match std::ffi::CString::new(s) {
+            Ok(c) => c,
+            Err(_) => return std::ptr::null_mut(),
+        };
+        let cls = match Class::get("NSString") {
+            Some(c) => c,
+            None => return std::ptr::null_mut(),
+        };
+        let alloc: *mut Object = msg_send![cls, alloc];
+        msg_send![alloc, initWithUTF8String: cs.as_ptr() as *mut std::os::raw::c_char]
+    }
+}
+
+#[cfg(target_os = "macos")]
+fn start_dnd_observer(handle: AppHandle) {
+    let _ = DND_HANDLE.set(handle);
+    DND_START.call_once(|| {
+        std::thread::Builder::new()
+            .name("dnd-observer".to_string())
+            .spawn(dnd_observer_main)
+            .ok();
+    });
+}
+
+#[cfg(target_os = "macos")]
+fn dnd_observer_main() {
+    use objc::runtime::{
+        class_addMethod, objc_allocateClassPair, objc_registerClassPair, sel_registerName, Imp,
+    };
+    use std::os::raw::c_char;
+
+    unsafe {
+        let nsobj = match Class::get("NSObject") {
+            Some(c) => c,
+            None => {
+                eprintln!("[health] DND 观察者：NSObject 缺失");
+                return;
+            }
+        };
+        let cls = objc_allocateClassPair(
+            nsobj,
+            b"HdDndObserver\0".as_ptr() as *const c_char,
+            0,
+        );
+        if cls.is_null() {
+            eprintln!("[health] DND 观察者：创建类失败");
+            return;
+        }
+        let ty = b"v@:@\0".as_ptr() as *const c_char;
+        let imp_on: Imp = std::mem::transmute(hd_dnd_enabled as extern "C" fn(*mut Object, Sel, *mut Object));
+        let imp_off: Imp = std::mem::transmute(hd_dnd_disabled as extern "C" fn(*mut Object, Sel, *mut Object));
+        let sel_on = std::ffi::CString::new("hdDndOn:").unwrap();
+        let sel_off = std::ffi::CString::new("hdDndOff:").unwrap();
+        class_addMethod(cls, sel_registerName(sel_on.as_ptr()), imp_on, ty);
+        class_addMethod(cls, sel_registerName(sel_off.as_ptr()), imp_off, ty);
+        objc_registerClassPair(cls);
+
+        let obs_cls = match Class::get("HdDndObserver") {
+            Some(c) => c,
+            None => return,
+        };
+        // 观察者对象不释放：NSDistributedNotificationCenter 不 retain 观察者
+        let observer: *mut Object = msg_send![obs_cls, new];
+
+        let center: *mut Object = match Class::get("NSDistributedNotificationCenter") {
+            Some(c) => msg_send![c, defaultCenter],
+            None => {
+                eprintln!("[health] DND 观察者：NSDistributedNotificationCenter 缺失");
+                return;
+            }
+        };
+
+        let nil_obj: *mut Object = std::ptr::null_mut();
+        for (name, selname) in [
+            ("_NSDoNotDisturbEnabledNotification", "hdDndOn:"),
+            ("_NSDoNotDisturbDisabledNotification", "hdDndOff:"),
+        ] {
+            let n = ns_string(name);
+            let s = std::ffi::CString::new(selname).unwrap();
+            let sel = sel_registerName(s.as_ptr());
+            let _: () = msg_send![center, addObserver: observer selector: sel name: n object: nil_obj];
+        }
+        eprintln!("[health] DND 观察者已注册：监听系统勿扰广播（无需权限）");
+
+        // 分布式通知靠 run loop 投递，线程必须保持 run loop 运行
+        let rl: *mut Object = match Class::get("NSRunLoop") {
+            Some(c) => msg_send![c, currentRunLoop],
+            None => return,
+        };
+        let _: () = msg_send![rl, run];
+    }
 }
 #[cfg(not(target_os = "macos"))]
 fn is_dnd_active() -> bool {
@@ -1553,6 +1721,9 @@ fn main() {
                     .handle()
                     .set_activation_policy(tauri::ActivationPolicy::Accessory);
                 let _ = APP_HANDLE.set(app.handle().clone());
+
+                // 系统勿扰（Focus）实时同步：监听 Control Center 的分布式通知广播
+                start_dnd_observer(app.handle().clone());
 
                 // 清空默认 App 菜单（File/Edit/View...），只保留状态栏图标
                 use tauri::menu::Menu;
