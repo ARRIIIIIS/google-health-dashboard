@@ -63,7 +63,7 @@ function buildWidgetDoc(character, eid, sed) {
   const HEAD = "<!doctype html><html><head><meta charset='utf-8'>" +
     "<style>html,body{margin:0;padding:0;background:transparent;overflow:hidden;width:100%;height:100%;-webkit-user-select:none;user-select:none}" +
     "#bot{width:100%;height:100%;display:flex;align-items:center;justify-content:center}#bot svg{display:block;width:100%;height:100%}</style></head><body><div id='bot'></div>" +
-    "<script>document.addEventListener('contextmenu',function(e){e.preventDefault();});document.addEventListener('selectstart',function(e){e.preventDefault();});</script>";
+    "<script>document.addEventListener('contextmenu',function(e){e.preventDefault();});document.addEventListener('selectstart',function(e){e.preventDefault();});document.addEventListener('click',function(){try{if(window.__cycleEmotion)window.__cycleEmotion();}catch(e){}});</script>";
   const esc = (s) => s.replace(/<\/script>/gi, "<\\/script>");
   const SED = sed ? "true" : "false";
 
@@ -77,7 +77,7 @@ function buildWidgetDoc(character, eid, sed) {
         "var m=MoodMates.create(document.getElementById('bot'),{character:'" + charId + "',emotion:'" + eid + "',idle:true,eyeScale:1.5});" +
         "window.__char=m;window.__charReady=true;" +
         "var ids=['10','19','03','13','33','30','11','18','02','15','12','04','20','35','36','31'];var ai=0;" +
-        "window.__cycleEmotion=function(){var arr=" + SED + "?['21','34']:ids;ai=(ai+1)%arr.length;try{m.setEmotion(arr[ai]);}catch(e){}};" +
+        "window.__cycleEmotion=function(){var arr=" + SED + "?['21','34']:ids;var n;do{n=Math.floor(Math.random()*arr.length);}while(n===ai&&arr.length>1);ai=n;try{m.setEmotion(arr[ai]);}catch(e){}};" +
       "}catch(e){document.title='ERR:'+(e.message||e).slice(0,80)}})()</script>" +
       "</body></html>";
   }
@@ -94,7 +94,7 @@ function buildWidgetDoc(character, eid, sed) {
         "show(" + JSON.stringify(st) + ");" +
         "window.__char={setGaze:function(){},clearGaze:function(){}};window.__charReady=true;" +
         "var ki=order.indexOf(" + JSON.stringify(st) + ");if(ki<0)ki=0;" +
-        "window.__cycleEmotion=function(){ki=(ki+1)%order.length;show(order[ki]);};" +
+        "window.__cycleEmotion=function(){var n;do{n=Math.floor(Math.random()*order.length);}while(n===ki&&order.length>1);ki=n;show(order[ki]);};" +
       "}catch(e){document.title='ERR:'+(e.message||e).slice(0,80)}})()</script>" +
       "</body></html>";
   }
@@ -109,7 +109,7 @@ function buildWidgetDoc(character, eid, sed) {
       "var SED=" + SED + ";" +
       "var ac=['10','19','03','13','14','16','30','11','18','33','02','15','12','04','20','35','36','31','39','40'];" +
       "var ai=0;" +
-      "window.__cycleEmotion=function(){var arr=SED?['21','34']:ac;ai=(ai+1)%arr.length;b.setEmotion(arr[ai]);};" +
+      "window.__cycleEmotion=function(){var arr=SED?['21','34']:ac;var n;do{n=Math.floor(Math.random()*arr.length);}while(n===ai&&arr.length>1);ai=n;b.setEmotion(arr[ai]);};" +
       "if(!SED){window.__autoTimer=setInterval(window.__cycleEmotion,4500);}" +
     "}catch(e){document.title='ERR:'+(e.message||e).slice(0,80)}})()</script>" +
     "</body></html>";
@@ -781,11 +781,18 @@ async function genAiTip(data, settings, rolling_averages) {
     }
     const j = JSON.parse(raw);
     const msg = j.choices && j.choices[0] && j.choices[0].message;
+    // 去掉模型的思考/推理过程：DeepSeek 等会用 <think>…</think> 包裹，或放在 reasoning_content 字段
     let c = msg && msg.content;
-    if (!c && msg && msg.reasoning_content && /[\u4e00-\u9fa5]/.test(msg.reasoning_content)) {
-      c = msg.reasoning_content;
+    if (c) {
+      c = c
+        .replace(/<think>[\s\S]*?<\/think>/gi, "")
+        .replace(/<thinking>[\s\S]*?<\/thinking>/gi, "")
+        .replace(/<\/?think>/gi, "")
+        .trim();
     }
-    return c ? c.trim().replace(/\*+/g, "").trim() : null;
+    // 思考过程(reasoning_content)绝不展示给用户；content 剥离思考后为空则回退静态提示，不拿推理当答案
+    if (!c) return null;
+    return c.replace(/\*+/g, "").trim();
   } catch (e) {
     return null;
   }
