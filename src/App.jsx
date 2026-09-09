@@ -138,13 +138,16 @@ function computeBallEmotion(t, sedOverride) {
   return "19";
 }
 
+// 只清洗 emoji / 不可见符号，保留中文标点（早期版本为配合「无标点」提示词会删标点，现不需要）
 function cleanTip(s) {
   if (!s) return "";
-  return s
+  let t = s
     .replace(/[🀀-🿿﻿‍]/gu, "")
-    .replace(/[，。、；：！？“”‘’（）《》【】…—～,.;:!?()\[\]"'`\-]/g, "")
-    .replace(/\s+/g, "")
+    .replace(/\s+/g, " ")
     .trim();
+  // 兜底：模型偶尔仍会漏掉句末标点
+  if (t && !/[。！？!?…]$/.test(t)) t += "。";
+  return t;
 }
 
 // ── Settings panel（覆盖在小组件之上的滚动设置层）────────────────────────────
@@ -893,7 +896,7 @@ export default function App() {
         }
         // 勿扰检测（仅久坐时查）
         if (tauriAvailable() && today.sedentary && s && s.respect_dnd) {
-          try { setDndActive(await invoke("is_dnd_active")); } catch (e) {}
+          try { setDndActive(await invoke("is_dnd_active_cmd")); } catch (e) {}
         } else {
           setDndActive(false);
         }
@@ -908,7 +911,7 @@ export default function App() {
           if (tauriAvailable()) {
             setForceWidgetPop(true);
             let dnd = false;
-            if (s && s.respect_dnd) { try { dnd = await invoke("is_dnd_active"); } catch (e) {} }
+            if (s && s.respect_dnd) { try { dnd = await invoke("is_dnd_active_cmd"); } catch (e) {} }
             if (!dnd && !snoozed2) {
               try { await invoke("show_sed_popover"); } catch (e) {}
             }
