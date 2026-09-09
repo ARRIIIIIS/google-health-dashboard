@@ -176,8 +176,58 @@ const FALLBACK_TIPS = [
   "工作再忙也要记得喝水，起身倒杯水走两步吧，身体会很感谢你的。",
   "午后容易困倦没精神，深呼吸提提神，起身走动两分钟真的会清醒。",
 ];
+// ── Pixel Anime palette ──────────────────────────────────────────────────────
+// 深紫实底 + NES 配色 + 等宽字体；零渐变零圆角零模糊，硬边像素阴影 4px_4px_0px。
+const C_PIXEL_DARK = {
+  label: "#e0e0ff",
+  second: "rgba(224,224,255,0.85)",
+  third: "rgba(224,224,255,0.55)",
+  // 实底深紫 + 8x 像素网格（CSS gradient 模拟）；前端不让任何模糊透出
+  bg: "#2d1b69",
+  card: "#1a1040",
+  hairline: "#1a1040",
+  // NES 调色板
+  rim: "#ffd93d",   // 金色边框/角块
+  rimSoft: "#4a90d9",
+  glassCtl: "#1a1040",
+  green: "#50c878",
+  red: "#ff6b6b",
+  blue: "#4a90d9",
+  teal: "#4a90d9",
+  indigo: "#4a90d9",
+  amber: "#ffd93d",
+  alert: "#ff6b6b",
+};
+const C_PIXEL_LIGHT = {
+  label: "#1a1040",
+  second: "rgba(26,16,64,0.85)",
+  third: "rgba(26,16,64,0.55)",
+  // 浅紫青实底（pixel-anime 浅色仍保持实底 + 零模糊）
+  bg: "#c5cae9",
+  card: "#e8eaf6",
+  hairline: "#1a1040",
+  rim: "#ffd93d",
+  rimSoft: "#4a90d9",
+  glassCtl: "#e8eaf6",
+  green: "#50c878",
+  red: "#ff6b6b",
+  blue: "#4a90d9",
+  teal: "#4a90d9",
+  indigo: "#4a90d9",
+  amber: "#ffd93d",
+  alert: "#ff6b6b",
+};
 // 当前生效调色板（随系统/设置切换）
 let C = C_DARK;
+// 按 (style, dark) 选调色板：液态玻璃走原 Apple 调色板，像素动漫风走 NES 实底
+function pickPalette(style, dark) {
+  if (style === "pixel-anime") return dark ? C_PIXEL_DARK : C_PIXEL_LIGHT;
+  return dark ? C_DARK : C_LIGHT;
+}
+// 像素动漫风开关（按 style 判定，不再依赖组件内 settingsRef）
+function isPixel(style) {
+  return style === "pixel-anime";
+}
 
 // 磨砂由系统 NSVisualEffectView 提供（HudWindow 材质），前端不再模拟噪点/高光
 
@@ -342,7 +392,7 @@ function SettingsPanel({ draft, setDraft, onSave, onCancel, busy, rerender, syst
           <div key={v} onClick={() => {
             set("theme", v);
             const dark = v === "dark" ? true : v === "light" ? false : systemDark;
-            C = dark ? C_DARK : C_LIGHT;
+            C = pickPalette(settingsRef.current.style, dark);
             rerender();
           }}
             style={{ flex: 1, textAlign: "center", fontSize: 10, fontWeight: 600, padding: "5px 0", borderRadius: 8, cursor: "pointer",
@@ -471,7 +521,7 @@ function Widget({ data, settings, character, onRefresh, onReset, justResetAt, se
               try {
                 const w = el.contentWindow;
                 if (!w || !w.__char) return;
-                const s = settingsRef.current;
+                const s = settings;
                 const R = (s && s.gaze_radius) ? s.gaze_radius : 80;
                 const TH = (s && s.gaze_threshold) ? s.gaze_threshold : 1.0;
                 const rect = el.getBoundingClientRect();
@@ -524,15 +574,26 @@ function Widget({ data, settings, character, onRefresh, onReset, justResetAt, se
         {ICO.chair}<span>{effIdle} min</span>
       </div>
       {effSed && effIdle != null && (
-        <div ref={function (el) { sedPopRef.current = el; }} style={{ position: "absolute", top: "calc(100% + 18px)", left: "50%", marginLeft: -93, width: 186, boxSizing: "border-box", zIndex: 50, borderRadius: 12, padding: "9px 11px 8px", background: "rgba(38,30,18,0.92)", backdropFilter: "blur(20px)", WebkitBackdropFilter: "blur(20px)", border: "1px solid rgba(255,159,10,0.45)", display: showSedPop ? "block" : "none", animation: "sed-pop .4s cubic-bezier(.2,.9,.3,1.15)" }}>
-          <div style={{ position: "absolute", top: -4.5, left: "50%", marginLeft: -4.5, width: 9, height: 9, background: "rgba(38,30,18,0.92)", borderLeft: "1px solid rgba(255,159,10,0.45)", borderTop: "1px solid rgba(255,159,10,0.45)", transform: "rotate(45deg)" }} />
-          <div style={{ fontSize: 10.5, fontWeight: 700, color: "#FF9F0A", letterSpacing: 0.2, display: "flex", alignItems: "center", gap: 5 }}>
+        <div ref={function (el) { sedPopRef.current = el; }} style={ isPixel(settings && settings.style) ? {
+          // 像素风：金底实色 + 0 圆角 + 2px 黑边 + 硬边阴影（4px_4px_0）+ 等宽字体
+          position: "absolute", top: "calc(100% + 18px)", left: "50%", marginLeft: -93, width: 186, boxSizing: "border-box", zIndex: 50,
+          borderRadius: 0, padding: "9px 11px 8px",
+          background: C.amber, border: "2px solid #1a1040",
+          boxShadow: "4px 4px 0 #1a1040",
+          fontFamily: "ui-monospace, 'SF Mono', Menlo, Monaco, monospace",
+          display: showSedPop ? "block" : "none",
+          animation: "sed-pop .15s steps(4)",
+        } : {
+          position: "absolute", top: "calc(100% + 18px)", left: "50%", marginLeft: -93, width: 186, boxSizing: "border-box", zIndex: 50, borderRadius: 12, padding: "9px 11px 8px", background: "rgba(38,30,18,0.92)", backdropFilter: "blur(20px)", WebkitBackdropFilter: "blur(20px)", border: "1px solid rgba(255,159,10,0.45)", display: showSedPop ? "block" : "none", animation: "sed-pop .4s cubic-bezier(.2,.9,.3,1.15)",
+        } }>
+          <div style={ isPixel(settings && settings.style) ? { position: "absolute", top: -5, left: "50%", marginLeft: -5, width: 10, height: 10, background: C.amber, border: "2px solid #1a1040", borderRight: "none", borderBottom: "none" } : { position: "absolute", top: -4.5, left: "50%", marginLeft: -4.5, width: 9, height: 9, background: "rgba(38,30,18,0.92)", borderLeft: "1px solid rgba(255,159,10,0.45)", borderTop: "1px solid rgba(255,159,10,0.45)", transform: "rotate(45deg)" } } />
+          <div style={ isPixel(settings && settings.style) ? { fontSize: 10.5, fontWeight: 700, color: "#1a1040", fontFamily: "ui-monospace, monospace", textTransform: "uppercase", letterSpacing: 0.5, display: "flex", alignItems: "center", gap: 5 } : { fontSize: 10.5, fontWeight: 700, color: "#FF9F0A", letterSpacing: 0.2, display: "flex", alignItems: "center", gap: 5 } }>
             {ICO.chair}<span>{T("sedentaryMin", { m: idleMin })}</span>
           </div>
-          <div style={{ fontSize: 8.5, color: "rgba(255,159,10,0.65)", marginTop: 2 }}>{T("standHint")}</div>
+          <div style={ isPixel(settings && settings.style) ? { fontSize: 8.5, color: "#1a1040", fontFamily: "ui-monospace, monospace", marginTop: 2 } : { fontSize: 8.5, color: "rgba(255,159,10,0.65)", marginTop: 2 } }>{T("standHint")}</div>
           <div style={{ display: "flex", gap: 6, marginTop: 7 }}>
-            <div onMouseDown={function (e) { e.stopPropagation(); if (sedPopRef.current) sedPopRef.current.style.display = "none"; dismissSedPop(); try { invoke("snooze_sedentary", { minutes: 30 }); invoke("hide_sed_popover"); } catch (e) {} }} style={{ flex: 1, textAlign: "center", fontSize: 9, fontWeight: 600, color: "rgba(255,159,10,0.65)", border: "1px solid rgba(255,159,10,0.35)", padding: "3px 0", borderRadius: 99, cursor: "pointer" }}>{T("later")}</div>
-            <div onMouseDown={function (e) { e.stopPropagation(); if (sedPopRef.current) sedPopRef.current.style.display = "none"; dismissSedPop(); try { onReset(); invoke("hide_sed_popover"); } catch (e) {} }} style={{ flex: 1, textAlign: "center", fontSize: 9, fontWeight: 600, color: "#0a0a0c", background: "#FF9F0A", padding: "4px 0", borderRadius: 99, cursor: "pointer" }}>{T("stoodUp")}</div>
+            <div onMouseDown={function (e) { e.stopPropagation(); if (sedPopRef.current) sedPopRef.current.style.display = "none"; dismissSedPop(); try { invoke("snooze_sedentary", { minutes: 30 }); invoke("hide_sed_popover"); } catch (e) {} }} style={ isPixel(settings && settings.style) ? { flex: 1, textAlign: "center", fontSize: 9, fontWeight: 700, color: "#1a1040", fontFamily: "ui-monospace, monospace", textTransform: "uppercase", border: "2px solid #1a1040", padding: "3px 0", borderRadius: 0, cursor: "pointer" } : { flex: 1, textAlign: "center", fontSize: 9, fontWeight: 600, color: "rgba(255,159,10,0.65)", border: "1px solid rgba(255,159,10,0.35)", padding: "3px 0", borderRadius: 99, cursor: "pointer" } }>{T("later")}</div>
+            <div onMouseDown={function (e) { e.stopPropagation(); if (sedPopRef.current) sedPopRef.current.style.display = "none"; dismissSedPop(); try { onReset(); invoke("hide_sed_popover"); } catch (e) {} }} style={ isPixel(settings && settings.style) ? { flex: 1, textAlign: "center", fontSize: 9, fontWeight: 700, color: "#fff", fontFamily: "ui-monospace, monospace", textTransform: "uppercase", background: "#1a1040", border: "2px solid #1a1040", padding: "3px 0", borderRadius: 0, cursor: "pointer" } : { flex: 1, textAlign: "center", fontSize: 9, fontWeight: 600, color: "#0a0a0c", background: "#FF9F0A", padding: "4px 0", borderRadius: 99, cursor: "pointer" } }>{T("stoodUp")}</div>
           </div>
         </div>
       )}
@@ -571,7 +632,23 @@ function Widget({ data, settings, character, onRefresh, onReset, justResetAt, se
     </div>
   );
 
-  const glassStyle = {
+  const glassStyle = isPixel(settings && settings.style) ? {
+    width: "100%",
+    height: "100%",
+    boxSizing: "border-box",
+    padding: "10px 12px",
+    // 像素动漫风：0 圆角、实底深紫/浅紫青、2px 硬边深角线、硬边像素阴影（4px 4px 0）
+    borderRadius: 0,
+    background: C.bg,
+    border: "2px solid #1a1040",
+    boxShadow: "4px 4px 0 #1a1040",
+    fontFamily: "ui-monospace, 'SF Mono', Menlo, Monaco, Consolas, monospace",
+    display: "flex",
+    flexDirection: "column",
+    overflow: "hidden",
+    position: "relative",
+    imageRendering: "pixelated",
+  } : {
     width: "100%",
     height: "100%",
     boxSizing: "border-box",
@@ -656,10 +733,21 @@ function Widget({ data, settings, character, onRefresh, onReset, justResetAt, se
           <span style={{ fontSize: 8.5, color: C.third, flexShrink: 0, fontVariantNumeric: "tabular-nums" }}>{t.sleep_deep_min ? T("deepShort") + t.sleep_deep_min + "·REM" + (t.sleep_rem_min || 0) : ""}</span>
         </div>
         {tipText && (
-          <div style={{ display: "flex", alignItems: "center", gap: 6, padding: "0 2px", position: "relative" }}>
-            <span style={{ width: 4, height: 4, borderRadius: "50%", background: tipDot, opacity: 0.9, flexShrink: 0, boxShadow: "0 0 6px " + tipDot }} />
-            <span style={{ fontSize: 9.5, color: C.second, fontWeight: 500, lineHeight: 1.3, flex: 1, overflow: "hidden", display: "-webkit-box", WebkitLineClamp: 2, WebkitBoxOrient: "vertical" }}>{tipText}</span>
-          </div>
+          isPixel(settings && settings.style) ? (
+            // RPG 对话框：2px 黑边 + 四角金色角块装饰（绝对定位伪元素）+ 等宽字体 + 0 圆角
+            <div style={{ position: "relative", padding: "5px 8px 5px 12px", background: C.card, border: "2px solid #1a1040", borderRadius: 0, marginTop: 4 }}>
+              <div style={{ position: "absolute", left: 4, top: 4, width: 4, height: 4, background: C.rim }} />
+              <div style={{ position: "absolute", right: 4, top: 4, width: 4, height: 4, background: C.rim }} />
+              <div style={{ position: "absolute", left: 4, bottom: 4, width: 4, height: 4, background: C.rim }} />
+              <div style={{ position: "absolute", right: 4, bottom: 4, width: 4, height: 4, background: C.rim }} />
+              <span style={{ fontSize: 9, color: C.label, fontFamily: "ui-monospace, 'SF Mono', Menlo, Monaco, monospace", fontWeight: 700, lineHeight: 1.35, flex: 1, display: "block" }}>{tipText}</span>
+            </div>
+          ) : (
+            <div style={{ display: "flex", alignItems: "center", gap: 6, padding: "0 2px", position: "relative" }}>
+              <span style={{ width: 4, height: 4, borderRadius: "50%", background: tipDot, opacity: 0.9, flexShrink: 0, boxShadow: "0 0 6px " + tipDot }} />
+              <span style={{ fontSize: 9.5, color: C.second, fontWeight: 500, lineHeight: 1.3, flex: 1, overflow: "hidden", display: "-webkit-box", WebkitLineClamp: 2, WebkitBoxOrient: "vertical" }}>{tipText}</span>
+            </div>
+          )
         )}
       </div>
     );
@@ -856,7 +944,7 @@ export default function App() {
   const applyTheme = useCallback(() => {
     const s = settingsRef.current;
     const dark = !s ? systemDark : s.theme === "dark" ? true : s.theme === "light" ? false : systemDark;
-    C = dark ? C_DARK : C_LIGHT;
+    C = pickPalette(settingsRef.current.style, dark);
     rerender();
   }, [systemDark, rerender]);
 
@@ -915,7 +1003,7 @@ export default function App() {
       try { sysDark = (await invoke("get_appearance")) === "dark"; } catch (e) {}
       setSystemDark(sysDark);
       const dark = s.theme === "dark" ? true : s.theme === "light" ? false : sysDark;
-      C = dark ? C_DARK : C_LIGHT;
+      C = pickPalette(settingsRef.current.style, dark);
       rerender();
     } catch (e) {}
   }, [systemDark, rerender]);
@@ -1039,7 +1127,7 @@ export default function App() {
     // 语言立即生效
     setLang(s.language || "zh-CN");
     const dark = s.theme === "dark" ? true : s.theme === "light" ? false : systemDark;
-    C = dark ? C_DARK : C_LIGHT;
+    C = pickPalette(settingsRef.current.style, dark);
     rerender();
     try {
       await invoke("save_settings", { json: JSON.stringify(s) });
@@ -1074,7 +1162,7 @@ export default function App() {
         setSystemDark(dark);
         const s = settingsRef.current;
         const eff = !s ? dark : s.theme === "dark" ? true : s.theme === "light" ? false : dark;
-        C = eff ? C_DARK : C_LIGHT;
+        C = pickPalette(settingsRef.current.style, eff);
         rerender();
       }).then((u) => { unlisten = u; });
     });
@@ -1094,7 +1182,7 @@ export default function App() {
           setCharacterPref(s.character || "qiuqiu");
           setLang(s.language || "zh-CN");
           const dark = s.theme === "dark" ? true : s.theme === "light" ? false : systemDark;
-          C = dark ? C_DARK : C_LIGHT;
+          C = pickPalette(settingsRef.current.style, dark);
           rerender();
           // 设置变了（尤其是 LLM）：若配了 LLM 且有数据，立即重新生成 AI 建议
           if (s.llm_base_url && s.llm_api_key && !aiBusyRef.current && data) {

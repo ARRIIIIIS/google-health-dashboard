@@ -50,6 +50,9 @@ struct Settings {
     /// 系统勿扰（Focus）始终跟随，不再提供「勿扰式静音」用户开关。
     #[serde(default = "default_character")]
     character: String,
+    /// 视觉主题（仅换皮肤，布局不变）：liquid-glass(液态玻璃/系统磨砂) / pixel-anime(像素动漫风)
+    #[serde(default = "default_style")]
+    style: String,
     widget_visible: bool, // 小组件主窗口是否显示
     sedentary_min: u64, // 连续不动超过此时长(分钟)判定久坐
     sedentary_remind_min: u64, // 久坐后每隔多久复查提醒一次(分钟)
@@ -77,6 +80,7 @@ impl Default for Settings {
             pos_y: 60,
             pos_saved: false,
             character: "qiuqiu".into(),
+            style: "liquid-glass".into(),
             widget_visible: true,
             sedentary_min: 45,
             sedentary_remind_min: 30,
@@ -95,6 +99,7 @@ impl Default for Settings {
 fn default_gaze_threshold() -> f64 { 1.0 }
 fn default_gaze_radius() -> f64 { 80.0 }
 fn default_character() -> String { "qiuqiu".into() }
+fn default_style() -> String { "liquid-glass".into() }
 
 const SETTINGS_FILE: &str = "settings.json";
 
@@ -143,6 +148,9 @@ struct MenuStrings {
     theme_auto: String,
     theme_light: String,
     theme_dark: String,
+    style_sub: String,
+    style_liquid: String,
+    style_pixel: String,
     lang_sub: String,
     lang_zh: String,
     lang_en: String,
@@ -172,6 +180,8 @@ struct MenuItems {
     theme_auto: tauri::menu::CheckMenuItem<tauri::Wry>,
     theme_light: tauri::menu::CheckMenuItem<tauri::Wry>,
     theme_dark: tauri::menu::CheckMenuItem<tauri::Wry>,
+    style_liquid: tauri::menu::CheckMenuItem<tauri::Wry>,
+    style_pixel: tauri::menu::CheckMenuItem<tauri::Wry>,
     lang_zh: tauri::menu::CheckMenuItem<tauri::Wry>,
     lang_en: tauri::menu::CheckMenuItem<tauri::Wry>,
     lang_ja: tauri::menu::CheckMenuItem<tauri::Wry>,
@@ -193,6 +203,15 @@ struct MenuItems {
 }
 
 struct MenuItemsState(pub std::sync::Mutex<Option<MenuItems>>);
+
+/// 背景玻璃视图指针：切「主题」时用它动态改窗口圆角（液态玻璃 36 / 像素动漫风 0）
+/// `*mut objc::runtime::Object` 不是 Send/Sync，但本 app 仅 main 线程访问，强制安全。
+#[cfg(target_os = "macos")]
+struct GlassViewState(pub std::sync::Mutex<Option<*mut objc::runtime::Object>>);
+#[cfg(target_os = "macos")]
+unsafe impl Send for GlassViewState {}
+#[cfg(target_os = "macos")]
+unsafe impl Sync for GlassViewState {}
 
 /// 互斥组单选修正：把 on 项勾上、同组其它项取消勾
 fn menu_radio(group: &str, on: &str, it: &MenuItems) {
@@ -227,6 +246,10 @@ fn menu_radio(group: &str, on: &str, it: &MenuItems) {
             set(&it.char_claw, on == "char_claw");
             set(&it.char_random, on == "char_random");
         }
+        "style" => {
+            set(&it.style_liquid, on == "style_liquid");
+            set(&it.style_pixel, on == "style_pixel");
+        }
         _ => {}
     }
 }
@@ -241,6 +264,9 @@ fn menu_strings(lang: &str) -> MenuStrings {
             theme_auto: "Follow System".into(),
             theme_light: "Light".into(),
             theme_dark: "Dark".into(),
+            style_sub: "Theme".into(),
+            style_liquid: "Liquid Glass".into(),
+            style_pixel: "Pixel Anime".into(),
             lang_sub: "Language".into(),
             lang_zh: "Simplified Chinese".into(),
             lang_en: "English".into(),
@@ -270,6 +296,9 @@ fn menu_strings(lang: &str) -> MenuStrings {
             theme_auto: "システムに従う".into(),
             theme_light: "ライト".into(),
             theme_dark: "ダーク".into(),
+            style_sub: "テーマ".into(),
+            style_liquid: "リキッドガラス".into(),
+            style_pixel: "ピクセルアニメ".into(),
             lang_sub: "言語".into(),
             lang_zh: "简体中文".into(),
             lang_en: "English".into(),
@@ -299,6 +328,9 @@ fn menu_strings(lang: &str) -> MenuStrings {
             theme_auto: "跟随系统".into(),
             theme_light: "浅色模式".into(),
             theme_dark: "深色模式".into(),
+            style_sub: "主题".into(),
+            style_liquid: "液态玻璃".into(),
+            style_pixel: "像素动漫风".into(),
             lang_sub: "语言".into(),
             lang_zh: "简体中文".into(),
             lang_en: "English".into(),
@@ -364,7 +396,15 @@ fn build_main_menu(app: &AppHandle, s: &Settings) -> tauri::menu::Menu<tauri::Wr
         &[&char_random, &char_qiuqiu, &char_nimbo, &char_twinkle, &char_claw]
     ).unwrap();
 
-    // ── 主题子菜单 ──
+    // ── 视觉主题子菜单（仅换皮肤：液态玻璃 / 像素动漫风）──
+    let style_liquid = CheckMenuItem::with_id(app, "style_liquid", &m.style_liquid, true, s.style == "liquid-glass", None::<&str>).unwrap();
+    let style_pixel  = CheckMenuItem::with_id(app, "style_pixel",  &m.style_pixel,  true, s.style == "pixel-anime",  None::<&str>).unwrap();
+    let style_sub = Submenu::with_id_and_items(
+        app, "style_menu", &m.style_sub, true,
+        &[&style_liquid, &style_pixel]
+    ).unwrap();
+
+    // ── 外观子菜单（明暗）──
     let theme_auto  = CheckMenuItem::with_id(app, "theme_auto",  &m.theme_auto,  true, s.theme == "auto",  None::<&str>).unwrap();
     let theme_light = CheckMenuItem::with_id(app, "theme_light", &m.theme_light, true, s.theme == "light", None::<&str>).unwrap();
     let theme_dark  = CheckMenuItem::with_id(app, "theme_dark",  &m.theme_dark,  true, s.theme == "dark",  None::<&str>).unwrap();
@@ -417,7 +457,8 @@ fn build_main_menu(app: &AppHandle, s: &Settings) -> tauri::menu::Menu<tauri::Wr
     items.push(&toggle_visible);      // 窗口：高频开关
     items.push(&refresh_now);         // 操作：立即刷新
     items.push(&sep);
-    items.push(&char_sub);            // 个性化：桌搭伙伴 / 外观 / 语言
+    items.push(&char_sub);            // 个性化：桌搭伙伴 / 主题 / 外观 / 语言
+    items.push(&style_sub);
     items.push(&theme_sub);
     items.push(&lang_sub);
     items.push(&sep);
@@ -437,6 +478,7 @@ fn build_main_menu(app: &AppHandle, s: &Settings) -> tauri::menu::Menu<tauri::Wr
     if let Some(st) = app.try_state::<MenuItemsState>() {
         *st.0.lock().unwrap() = Some(MenuItems {
             theme_auto, theme_light, theme_dark,
+            style_liquid, style_pixel,
             lang_zh, lang_en, lang_ja,
             refresh_5, refresh_15, refresh_30,
             sed_30, sed_40, sed_45, sed_60, sed_90,
@@ -464,6 +506,22 @@ fn rebuild_tray_menu(app: &AppHandle) {
 /// NSGlassEffectView / NSVisualEffectView 通过 layer.shadow* 实现折射/高光，
 /// 这是液态玻璃的核心视觉特征，不能关。只关 NSWindow 自身的 setHasShadow。
 #[cfg(target_os = "macos")]
+/// 切主题时动态调整窗口圆角：液态玻璃 36 / 像素动漫风 0
+#[cfg(target_os = "macos")]
+fn apply_window_style(app: &AppHandle, style: &str) {
+    let radius: f64 = if style == "pixel-anime" { 0.0 } else { 36.0 };
+    unsafe {
+        use objc::{msg_send, sel, sel_impl};
+        use objc::runtime::Object;
+        if let Some(p) = app.try_state::<GlassViewState>() {
+            if let Some(ptr) = *p.inner().0.lock().unwrap() {
+                let glass: *mut Object = ptr;
+                let _: () = msg_send![glass, setCornerRadius: radius];
+            }
+        }
+    }
+}
+
 fn disable_window_shadow(win: &tauri::WebviewWindow) {
     use objc::{msg_send, sel, sel_impl};
     if let Ok(ns) = win.ns_window() {
@@ -1779,6 +1837,8 @@ fn main() {
             app.manage(SettingsHandle(Arc::new(Mutex::new(settings.clone()))));
             #[cfg(target_os = "macos")]
             app.manage(MenuItemsState(std::sync::Mutex::new(None)));
+            #[cfg(target_os = "macos")]
+            app.manage(GlassViewState(std::sync::Mutex::new(None)));
 
             // macOS：桌面小组件窗口
             #[cfg(target_os = "macos")]
@@ -1810,17 +1870,19 @@ fn main() {
                         objc::runtime::Class::get("NSGlassEffectView");
                     let mut used_glass = false;
                     if let (Some(gcls), Ok(wv_ptr)) = (glass_cls, win.ns_view()) {
-                        // Apple Liquid Glass：把整个 webview 作为 contentView 嵌进玻璃，
-                        // 由系统负责折射/高光/边缘镜面，并按 cornerRadius 裁剪内容。
-                        // 0 = Regular（标准液态玻璃，高光与折射明显）
-                        // 1 = Clear（清玻璃，更通透、高光更弱）
-                        let _wv = wv_ptr as *mut Object; // 仅校验 webview 句柄可用，不移动它
-                        let glass: *mut Object = msg_send![gcls, alloc];
-                        let glass: *mut Object = msg_send![glass, initWithFrame: frame];
-                        // 0 = Regular（标准液态玻璃，高光/折射明显，但浅色外观下底偏白）
-                        // 1 = Clear（清玻璃，更通透、底更薄）—— 浅色外观下用 Clear 避免"白底"
-                        let _: () = msg_send![glass, setStyle: 1i64];
-                        let _: () = msg_send![glass, setCornerRadius: 36.0f64];
+// macOS 26+ 真·液态玻璃：把整个 webview 作为 contentView 嵌进玻璃，
+                    // 由系统负责折射/高光/边缘镜面，并按 cornerRadius 裁剪内容。
+                    // 0 = Regular（标准液态玻璃，高光与折射明显）
+                    // 1 = Clear（清玻璃，更通透、高光更弱）
+                    let _wv = wv_ptr as *mut Object; // 仅校验 webview 句柄可用，不移动它
+                    let glass: *mut Object = msg_send![gcls, alloc];
+                    let glass: *mut Object = msg_send![glass, initWithFrame: frame];
+                    // 0 = Regular（标准液态玻璃，高光/折射明显，但浅色外观下底偏白）
+                    // 1 = Clear（清玻璃，更通透、底更薄）—— 浅色外观下用 Clear 避免"白底"
+                    let _: () = msg_send![glass, setStyle: 1i64];
+                    // 圆角按当前主题决定：液态玻璃 36 / 像素动漫风 0（实底硬边方角）
+                    let initial_radius: f64 = if settings.style == "pixel-anime" { 0.0 } else { 36.0 };
+                    let _: () = msg_send![glass, setCornerRadius: initial_radius];
                         let _: () = msg_send![glass, setAutoresizingMask: 18u64];
                         // 液态玻璃默认带阴影来表现层次，但阴影轮廓是**矩形**（cornerRadius 只裁剪
                         // 玻璃本身的绘制，不改变 shadow 形状）→ 四角会露出方形投影。用户明确不要阴影，关掉。
@@ -1834,6 +1896,10 @@ fn main() {
                         let null_obj: *mut Object = std::ptr::null_mut();
                         let _: () = msg_send![content_view, addSubview: glass positioned: -1i64 relativeTo: null_obj];
                         used_glass = true;
+                        // 保存玻璃视图指针到 GlassViewState（切主题时改圆角）
+                        if let Some(g) = app.try_state::<GlassViewState>() {
+                            *g.inner().0.lock().unwrap() = Some(glass as *mut objc::runtime::Object);
+                        }
                     }
                     if !used_glass {
                     // 系统原生磨砂玻璃：直接用 objc 建 NSVisualEffectView（绕过 window-vibrancy crate）
@@ -1853,15 +1919,19 @@ fn main() {
                     let _: () = msg_send![vibrancy, setBlendingMode: 0i64];
                     // Inactive state (1) — 锁定浅色，窗口激活不切换
                     let _: () = msg_send![vibrancy, setState: 1i64];
-                    // 36px 圆角
-                    let _: () = msg_send![vibrancy, setCornerRadius: 36.0f64];
+                    let initial_radius2: f64 = if settings.style == "pixel-anime" { 0.0 } else { 36.0 };
+                    let _: () = msg_send![vibrancy, setCornerRadius: initial_radius2];
                     // WantsLayer
                     let _: () = msg_send![vibrancy, setWantsLayer: YES_BOOL];
                     // autoresizing: width+height sizable (18 = 2|16)
                     let _: () = msg_send![vibrancy, setAutoresizingMask: 18u64];
                     // 加到 contentView 下方（NSWindowBelow = -1）
-                    let null_obj: *mut Object = std::ptr::null_mut();
-                    let _: () = msg_send![content_view, addSubview: vibrancy positioned: -1i64 relativeTo: null_obj];
+                    let null_obj2: *mut Object = std::ptr::null_mut();
+                    let _: () = msg_send![content_view, addSubview: vibrancy positioned: -1i64 relativeTo: null_obj2];
+                    // 同样把旧版 NSVisualEffectView 指针存到 GlassViewState，切主题时改圆角
+                    if let Some(g) = app.try_state::<GlassViewState>() {
+                        *g.inner().0.lock().unwrap() = Some(vibrancy as *mut objc::runtime::Object);
+                    }
                     }
                 }
                 // vibrancy 挂载后再清理一次窗口阴影
@@ -2019,6 +2089,9 @@ fn main() {
                             "theme_auto"  => { radio("theme", "theme_auto");  sh.set("theme", "auto");  s_changed = true; }
                             "theme_light" => { radio("theme", "theme_light"); sh.set("theme", "light"); s_changed = true; }
                             "theme_dark"  => { radio("theme", "theme_dark");  sh.set("theme", "dark");  s_changed = true; }
+                            // ── 主题（仅换皮肤：液态玻璃 / 像素动漫风）──
+                            "style_liquid" => { radio("style", "style_liquid"); sh.set("style", "liquid-glass"); apply_window_style(app, "liquid-glass"); s_changed = true; }
+                            "style_pixel"  => { radio("style", "style_pixel");  sh.set("style", "pixel-anime");  apply_window_style(app, "pixel-anime");  s_changed = true; }
                             // ── 语言 ──
                             "lang_zh" => { radio("lang", "lang_zh"); sh.set("language", "zh-CN"); s_changed = true; }
                             "lang_en" => { radio("lang", "lang_en"); sh.set("language", "en");    s_changed = true; }
