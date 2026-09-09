@@ -80,3 +80,18 @@ body.hd-refreshing .hd-refresh-btn svg {
   background: rgba(255, 255, 255, 0.24) !important;
   transform: scale(0.92);
 }
+
+/* 开发者终端：命令提示符后的闪烁光标块（硬切，无淡入淡出） */
+@keyframes hd-cursor-blink {
+  0%,
+  49% {
+    opacity: 1;
+  }
+  50%,
+  100% {
+    opacity: 0;
+  }
+}
+.hd-cursor {
+  animation: hd-cursor-blink 1.06s steps(1, end) infinite;
+}

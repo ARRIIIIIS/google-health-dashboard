@@ -151,6 +151,8 @@ struct MenuStrings {
     style_sub: String,
     style_liquid: String,
     style_pixel: String,
+    style_brutal: String,
+    style_term: String,
     lang_sub: String,
     lang_zh: String,
     lang_en: String,
@@ -182,6 +184,8 @@ struct MenuItems {
     theme_dark: tauri::menu::CheckMenuItem<tauri::Wry>,
     style_liquid: tauri::menu::CheckMenuItem<tauri::Wry>,
     style_pixel: tauri::menu::CheckMenuItem<tauri::Wry>,
+    style_brutal: tauri::menu::CheckMenuItem<tauri::Wry>,
+    style_term: tauri::menu::CheckMenuItem<tauri::Wry>,
     lang_zh: tauri::menu::CheckMenuItem<tauri::Wry>,
     lang_en: tauri::menu::CheckMenuItem<tauri::Wry>,
     lang_ja: tauri::menu::CheckMenuItem<tauri::Wry>,
@@ -249,6 +253,8 @@ fn menu_radio(group: &str, on: &str, it: &MenuItems) {
         "style" => {
             set(&it.style_liquid, on == "style_liquid");
             set(&it.style_pixel, on == "style_pixel");
+            set(&it.style_brutal, on == "style_brutal");
+            set(&it.style_term, on == "style_term");
         }
         _ => {}
     }
@@ -267,6 +273,8 @@ fn menu_strings(lang: &str) -> MenuStrings {
             style_sub: "Theme".into(),
             style_liquid: "Liquid Glass".into(),
             style_pixel: "Pixel Anime".into(),
+            style_brutal: "Brutalist Web".into(),
+            style_term: "Developer Terminal".into(),
             lang_sub: "Language".into(),
             lang_zh: "Simplified Chinese".into(),
             lang_en: "English".into(),
@@ -299,6 +307,8 @@ fn menu_strings(lang: &str) -> MenuStrings {
             style_sub: "テーマ".into(),
             style_liquid: "リキッドガラス".into(),
             style_pixel: "ピクセルアニメ".into(),
+            style_brutal: "ブルータリストウェブ".into(),
+            style_term: "デベロッパーターミナル".into(),
             lang_sub: "言語".into(),
             lang_zh: "简体中文".into(),
             lang_en: "English".into(),
@@ -331,6 +341,8 @@ fn menu_strings(lang: &str) -> MenuStrings {
             style_sub: "主题".into(),
             style_liquid: "液态玻璃".into(),
             style_pixel: "像素动漫风".into(),
+            style_brutal: "网页粗野主义".into(),
+            style_term: "开发者终端".into(),
             lang_sub: "语言".into(),
             lang_zh: "简体中文".into(),
             lang_en: "English".into(),
@@ -399,9 +411,11 @@ fn build_main_menu(app: &AppHandle, s: &Settings) -> tauri::menu::Menu<tauri::Wr
     // ── 视觉主题子菜单（仅换皮肤：液态玻璃 / 像素动漫风）──
     let style_liquid = CheckMenuItem::with_id(app, "style_liquid", &m.style_liquid, true, s.style == "liquid-glass", None::<&str>).unwrap();
     let style_pixel  = CheckMenuItem::with_id(app, "style_pixel",  &m.style_pixel,  true, s.style == "pixel-anime",  None::<&str>).unwrap();
+    let style_brutal = CheckMenuItem::with_id(app, "style_brutal", &m.style_brutal, true, s.style == "brutalist-web", None::<&str>).unwrap();
+    let style_term   = CheckMenuItem::with_id(app, "style_term",   &m.style_term,   true, s.style == "developer-terminal", None::<&str>).unwrap();
     let style_sub = Submenu::with_id_and_items(
         app, "style_menu", &m.style_sub, true,
-        &[&style_liquid, &style_pixel]
+        &[&style_liquid, &style_pixel, &style_brutal, &style_term]
     ).unwrap();
 
     // ── 外观子菜单（明暗）──
@@ -478,7 +492,7 @@ fn build_main_menu(app: &AppHandle, s: &Settings) -> tauri::menu::Menu<tauri::Wr
     if let Some(st) = app.try_state::<MenuItemsState>() {
         *st.0.lock().unwrap() = Some(MenuItems {
             theme_auto, theme_light, theme_dark,
-            style_liquid, style_pixel,
+            style_liquid, style_pixel, style_brutal, style_term,
             lang_zh, lang_en, lang_ja,
             refresh_5, refresh_15, refresh_30,
             sed_30, sed_40, sed_45, sed_60, sed_90,
@@ -506,10 +520,17 @@ fn rebuild_tray_menu(app: &AppHandle) {
 /// NSGlassEffectView / NSVisualEffectView 通过 layer.shadow* 实现折射/高光，
 /// 这是液态玻璃的核心视觉特征，不能关。只关 NSWindow 自身的 setHasShadow。
 #[cfg(target_os = "macos")]
-/// 切主题时动态调整窗口圆角：液态玻璃 36 / 像素动漫风 0
+/// 切主题时动态调整窗口圆角：液态玻璃 36 / 实底硬边风格（像素动漫 / 网页粗野主义 / 开发者终端）0
+#[cfg(target_os = "macos")]
+fn style_corner_radius(style: &str) -> f64 {
+    match style {
+        "pixel-anime" | "brutalist-web" | "developer-terminal" => 0.0,
+        _ => 36.0,
+    }
+}
 #[cfg(target_os = "macos")]
 fn apply_window_style(app: &AppHandle, style: &str) {
-    let radius: f64 = if style == "pixel-anime" { 0.0 } else { 36.0 };
+    let radius: f64 = style_corner_radius(style);
     unsafe {
         use objc::{msg_send, sel, sel_impl};
         use objc::runtime::Object;
@@ -1881,7 +1902,7 @@ fn main() {
                     // 1 = Clear（清玻璃，更通透、底更薄）—— 浅色外观下用 Clear 避免"白底"
                     let _: () = msg_send![glass, setStyle: 1i64];
                     // 圆角按当前主题决定：液态玻璃 36 / 像素动漫风 0（实底硬边方角）
-                    let initial_radius: f64 = if settings.style == "pixel-anime" { 0.0 } else { 36.0 };
+                    let initial_radius: f64 = style_corner_radius(&settings.style);
                     let _: () = msg_send![glass, setCornerRadius: initial_radius];
                         let _: () = msg_send![glass, setAutoresizingMask: 18u64];
                         // 液态玻璃默认带阴影来表现层次，但阴影轮廓是**矩形**（cornerRadius 只裁剪
@@ -1919,7 +1940,7 @@ fn main() {
                     let _: () = msg_send![vibrancy, setBlendingMode: 0i64];
                     // Inactive state (1) — 锁定浅色，窗口激活不切换
                     let _: () = msg_send![vibrancy, setState: 1i64];
-                    let initial_radius2: f64 = if settings.style == "pixel-anime" { 0.0 } else { 36.0 };
+                    let initial_radius2: f64 = style_corner_radius(&settings.style);
                     let _: () = msg_send![vibrancy, setCornerRadius: initial_radius2];
                     // WantsLayer
                     let _: () = msg_send![vibrancy, setWantsLayer: YES_BOOL];
@@ -2092,6 +2113,8 @@ fn main() {
                             // ── 主题（仅换皮肤：液态玻璃 / 像素动漫风）──
                             "style_liquid" => { radio("style", "style_liquid"); sh.set("style", "liquid-glass"); apply_window_style(app, "liquid-glass"); s_changed = true; }
                             "style_pixel"  => { radio("style", "style_pixel");  sh.set("style", "pixel-anime");  apply_window_style(app, "pixel-anime");  s_changed = true; }
+                            "style_brutal" => { radio("style", "style_brutal"); sh.set("style", "brutalist-web"); apply_window_style(app, "brutalist-web"); s_changed = true; }
+                            "style_term"   => { radio("style", "style_term");   sh.set("style", "developer-terminal"); apply_window_style(app, "developer-terminal"); s_changed = true; }
                             // ── 语言 ──
                             "lang_zh" => { radio("lang", "lang_zh"); sh.set("language", "zh-CN"); s_changed = true; }
                             "lang_en" => { radio("lang", "lang_en"); sh.set("language", "en");    s_changed = true; }

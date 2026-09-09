@@ -73,14 +73,36 @@
   /* ── Container ── */
   .container {
     width: 100%;
-    max-width: 520px;
+    max-width: 560px;
     padding: 72px 28px 56px;
     position: relative;
     z-index: 1;
   }
 
+  /* ── Language switch ── */
+  .lang-switch {
+    position: fixed; top: 20px; right: 24px; z-index: 20;
+    display: flex; gap: 3px;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 3px;
+    backdrop-filter: blur(28px) saturate(1.6);
+    -webkit-backdrop-filter: blur(28px) saturate(1.6);
+  }
+  .lang-btn {
+    appearance: none; border: none; cursor: pointer;
+    font-size: 12px; font-weight: 600; font-family: var(--font);
+    padding: 5px 10px; border-radius: 7px;
+    color: var(--text-secondary); background: transparent;
+    transition: background .2s, color .2s;
+    letter-spacing: 0.2px;
+  }
+  .lang-btn:hover { color: var(--text); }
+  .lang-btn.active { background: var(--accent); color: #fff; }
+
   /* ── Header ── */
-  .header { text-align: center; margin-bottom: 44px; }
+  .header { text-align: center; margin-bottom: 40px; }
 
   .app-icon {
     width: 80px; height: 80px;
@@ -118,26 +140,53 @@
     to   { opacity: 1; transform: translateY(0); }
   }
 
-  /* ── Progress dots ── */
-  .progress {
+  /* ── Stepper (horizontal step progress) ── */
+  .stepper {
     display: flex; align-items: center; justify-content: center;
-    gap: 10px;
-    margin-bottom: 36px;
+    margin-bottom: 30px;
     animation: fadeUp 0.6s 0.15s ease both;
   }
-  .dot {
-    width: 6px; height: 6px;
-    border-radius: 50%;
-    background: rgba(255,255,255,0.15);
-    transition: all 0.4s cubic-bezier(0.34, 1.56, 0.64, 1);
+  .step-node {
+    display: flex; align-items: center; gap: 9px;
+    cursor: pointer; user-select: none;
+    transition: opacity .3s;
   }
-  .dot.active {
-    width: 24px;
-    border-radius: 3px;
-    background: var(--accent);
-    box-shadow: 0 0 8px rgba(10,132,255,0.5);
+  .step-num {
+    width: 30px; height: 30px; border-radius: 50%;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 13.5px; font-weight: 700;
+    background: rgba(255,255,255,0.07); color: var(--text-secondary);
+    border: 1px solid var(--border);
+    transition: all .35s;
+    flex-shrink: 0;
   }
-  .dot.done { background: var(--success); }
+  .step-node.active .step-num {
+    background: var(--accent); border-color: var(--accent); color: #fff;
+    box-shadow: 0 0 14px rgba(10,132,255,0.5);
+  }
+  .step-node.done .step-num {
+    background: var(--success); border-color: var(--success); color: #fff;
+  }
+  .step-label {
+    font-size: 13.5px; font-weight: 600; color: var(--text-secondary);
+    transition: color .3s; white-space: nowrap;
+  }
+  .step-node.active .step-label { color: var(--text); }
+  .step-node.done .step-label { color: var(--success); }
+  .step-bar {
+    width: 72px; height: 3px; margin: 0 14px;
+    background: rgba(255,255,255,0.12); border-radius: 2px;
+    overflow: hidden; position: relative;
+  }
+  .step-bar-fill {
+    height: 100%; width: 0;
+    background: var(--accent); border-radius: 2px;
+    transition: width .45s cubic-bezier(.4,0,.2,1);
+  }
+  .step-bar.filled .step-bar-fill { width: 100%; }
+
+  /* ── Step panels ── */
+  .step-panel { animation: fadeUp 0.4s ease both; }
 
   /* ── Cards ── */
   .card {
@@ -152,8 +201,6 @@
     transition: border-color 0.3s, background 0.3s;
   }
   .card:hover { border-color: rgba(255,255,255,0.15); background: var(--surface-hover); }
-  .card:nth-of-type(1) { animation-delay: 0.2s; }
-  .card:nth-of-type(2) { animation-delay: 0.3s; }
 
   .card-label {
     display: flex; align-items: center; gap: 10px;
@@ -180,7 +227,7 @@
   .card-desc a { color: var(--accent); text-decoration: none; }
   .card-desc a:hover { text-decoration: underline; }
 
-  /* ── API 延迟测试行（每张卡片底部各一条，数据 API 与 LLM API 独立）── */
+  /* ── API 延迟测试行 ── */
   .test-row {
     display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
     margin: 16px 0 0 42px; padding-top: 14px;
@@ -367,7 +414,7 @@
   /* ── Footer action ── */
   .actions {
     display: flex; align-items: center; justify-content: space-between;
-    margin-top: 24px;
+    margin-top: 22px;
     animation: fadeUp 0.6s 0.4s ease both;
   }
   .status-msg {
@@ -380,7 +427,7 @@
 
   .btn {
     appearance: none; border: none; cursor: pointer;
-    padding: 13px 34px;
+    padding: 13px 30px;
     font-size: 15px; font-weight: 600;
     font-family: var(--font);
     color: #fff;
@@ -397,6 +444,15 @@
   }
   .btn:active:not(:disabled) { transform: translateY(0); box-shadow: 0 2px 8px rgba(10,132,255,0.3); }
   .btn:disabled { opacity: 0.45; cursor: default; transform: none; }
+
+  .btn-ghost {
+    appearance: none; border: 1px solid var(--border); cursor: pointer;
+    font-size: 14px; font-weight: 500; font-family: var(--font);
+    color: var(--text-secondary); background: transparent;
+    padding: 10px 24px; border-radius: 10px;
+    transition: border-color 0.2s, color 0.2s, background 0.2s;
+  }
+  .btn-ghost:hover { border-color: rgba(255,255,255,0.2); color: var(--text); background: var(--surface-hover); }
 
   /* ── Success overlay ── */
   #success {
@@ -426,14 +482,6 @@
   }
   #success h2 { font-size: 26px; font-weight: 700; letter-spacing: -0.5px; margin-bottom: 12px; }
   #success p { font-size: 14px; color: var(--text-secondary); line-height: 1.7; max-width: 360px; margin: 0 auto 28px; }
-  .btn-ghost {
-    appearance: none; border: 1px solid var(--border); cursor: pointer;
-    font-size: 14px; font-weight: 500; font-family: var(--font);
-    color: var(--text-secondary); background: transparent;
-    padding: 10px 24px; border-radius: 10px;
-    transition: border-color 0.2s, color 0.2s, background 0.2s;
-  }
-  .btn-ghost:hover { border-color: rgba(255,255,255,0.2); color: var(--text); background: var(--surface-hover); }
 
   /* ── Footer ── */
   footer {
@@ -472,7 +520,6 @@
       border-color: rgba(0,0,0,0.08);
       box-shadow: 0 8px 40px rgba(0,0,0,0.18), 0 0 0 1px rgba(0,0,0,0.04) inset;
     }
-    .dot { background: rgba(0,0,0,0.14); }
     .select-wrap select option { background: #fff; color: #1C1C1E; }
     input { background: rgba(0,0,0,0.035); }
     input::placeholder { color: var(--text-placeholder); }
@@ -484,12 +531,21 @@
     footer { color: rgba(0,0,0,0.25); }
     footer a { color: rgba(0,0,0,0.35); }
     footer a:hover { color: rgba(0,0,0,0.55); }
+    .step-num { background: rgba(0,0,0,0.06); border-color: rgba(0,0,0,0.09); color: #6E6E73; }
+    .step-bar { background: rgba(0,0,0,0.12); }
   }
 </style>
 </head>
 <body>
 
 <div class="bg-glow"></div>
+
+<!-- 语言切换 -->
+<div class="lang-switch" id="langSwitch">
+  <button type="button" class="lang-btn active" data-lang="zh">中</button>
+  <button type="button" class="lang-btn" data-lang="en">EN</button>
+  <button type="button" class="lang-btn" data-lang="ja">日</button>
+</div>
 
 <div class="container">
 
@@ -506,20 +562,25 @@
         <circle cx="27" cy="13" r="2" fill="#FF375F" opacity="0.7"/>
       </svg>
     </div>
-    <h1>设置向导</h1>
-    <p>配置 Google 健康数据与 AI 建议<br>所有内容仅保存在本机</p>
+    <h1 data-i18n="title">设置向导</h1>
+    <p data-i18n-html="subtitle">配置 Google 健康数据与 AI 建议<br>所有内容仅保存在本机</p>
   </div>
 
-  <!-- Progress dots -->
-  <div class="progress">
-    <div class="dot active" id="dot1"></div>
-    <div class="dot" id="dot2"></div>
+  <!-- 横向步骤进度条 -->
+  <div class="stepper">
+    <div class="step-node active" id="stepNode1" onclick="gotoStep(1)">
+      <span class="step-num">1</span>
+      <span class="step-label" data-i18n="step1">Google 健康数据</span>
+    </div>
+    <div class="step-bar" id="stepBar"><div class="step-bar-fill"></div></div>
+    <div class="step-node" id="stepNode2" onclick="gotoStep(2)">
+      <span class="step-num">2</span>
+      <span class="step-label" data-i18n="step2">AI 健康建议</span>
+    </div>
   </div>
 
-  <!-- Form -->
-  <form id="form" onsubmit="return false;">
-
-    <!-- Google 健康数据 -->
+  <!-- 步骤 1：Google 健康数据 -->
+  <div class="step-panel" id="step1">
     <div class="card">
       <div class="card-label">
         <div class="card-icon" style="background:rgba(66,133,244,0.12); border:1px solid rgba(66,133,244,0.2);">
@@ -530,49 +591,57 @@
             <path d="M9 3.5c1.18 0 2.24.406 3.076 1.2l2.3-2.3C12.62 1.29 10.9.5 9 .5A8.0 8.0 0 0 0 1.91 5.624L4.5 7.716C5.132 5.814 6.902 3.5 9 3.5z" fill="#EA4335"/>
           </svg>
         </div>
-        <span>Google 健康数据</span>
+        <span data-i18n="gTitle">Google 健康数据</span>
       </div>
-      <p class="card-desc">
+      <p class="card-desc" data-i18n-html="gDesc">
         从 Google 同步步数、心率、睡眠等数据。<br>
         需要 OAuth 2.0 凭据，按下方步骤 5 分钟即可完成。
       </p>
 
       <details class="howto">
-        <summary>如何获取 Client ID 与 Secret？<span class="arrow"></span></summary>
-        <div class="body">
-          <ol>
-            <li>打开 <a href="https://console.cloud.google.com/" target="_blank">Google Cloud Console</a> 并登录你的 Google 账号</li>
-            <li>顶部选择或新建一个项目，然后搜索并启用 <b>Fitness API</b></li>
-            <li>进入「API 和服务 → 凭据 → 创建凭据 → <b>OAuth 客户端 ID</b>」</li>
-            <li>应用类型选择 <b>桌面应用</b>，点击「创建」</li>
-            <li>复制页面上的 <b>Client ID</b> 与 <b>Client Secret</b>，填入右侧输入框</li>
-          </ol>
-        </div>
+        <summary>
+          <span data-i18n="gHowto">如何获取 Client ID 与 Secret？</span>
+          <span class="arrow"></span>
+        </summary>
+        <div class="body"><ol data-i18n-html="gHowtoSteps">
+          <li>打开 <a href="https://console.cloud.google.com/" target="_blank">Google Cloud Console</a> 并登录你的 Google 账号</li>
+          <li>顶部选择或新建一个项目，然后搜索并启用 <b>Fitness API</b></li>
+          <li>进入「API 和服务 → 凭据 → 创建凭据 → <b>OAuth 客户端 ID</b>」</li>
+          <li>应用类型选择 <b>桌面应用</b>，点击「创建」</li>
+          <li>复制页面上的 <b>Client ID</b> 与 <b>Client Secret</b>，填入下方输入框</li>
+        </ol></div>
       </details>
 
       <div class="field-row">
         <div class="field">
-          <label>Client ID</label>
-          <input id="gid" type="text" placeholder="xxxx.apps.googleusercontent.com" autocomplete="off" spellcheck="false" oninput="step(1)">
+          <label data-i18n="labelClientId">Client ID</label>
+          <input id="gid" type="text" placeholder="xxxx.apps.googleusercontent.com" autocomplete="off" spellcheck="false" data-i18n-ph="phClientId">
         </div>
         <div class="field">
-          <label>Client Secret</label>
-          <input id="gsec" type="password" placeholder="GOCSAX-xxxx" autocomplete="off" spellcheck="false" oninput="step(1)">
+          <label data-i18n="labelClientSecret">Client Secret</label>
+          <input id="gsec" type="password" placeholder="GOCSAX-xxxx" autocomplete="off" spellcheck="false" data-i18n-ph="phClientSecret">
         </div>
       </div>
 
       <!-- 数据 API 延迟测试 -->
       <div class="test-row">
         <div class="test-info">
-          <span class="test-title">数据 API 延迟测试</span>
-          <span class="test-hint">验证 Google 健康接口凭证是否有效，并测量往返延迟。</span>
+          <span class="test-title" data-i18n="testDataTitle">数据 API 延迟测试</span>
+          <span class="test-hint" data-i18n="testDataHint">验证 Google 健康接口凭证是否有效，并测量往返延迟。</span>
         </div>
-        <button type="button" class="btn-test" id="test-data-btn" onclick="testApi('data')">测试</button>
+        <button type="button" class="btn-test" id="test-data-btn" data-i18n="testBtn" onclick="testApi('data')">测试</button>
         <div class="test-result" id="test-data-result"></div>
       </div>
-    </div>
 
-    <!-- AI 健康建议 -->
+      <div class="actions">
+        <span class="status-msg" id="status1"></span>
+        <button class="btn" id="save1-btn" data-i18n="btnNext" onclick="saveStep(1)">保存并下一步</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- 步骤 2：AI 健康建议 -->
+  <div class="step-panel" id="step2" style="display:none">
     <div class="card">
       <div class="card-label">
         <div class="card-icon" style="background:rgba(10,132,255,0.12); border:1px solid rgba(10,132,255,0.2);">
@@ -580,84 +649,87 @@
             <path d="M9 1.5L10.8 6.5H16L11.9 9.7 13.7 14.7 9 11.5 4.3 14.7 6.1 9.7 2 6.5H7.2L9 1.5Z" fill="#0A84FF" stroke="#0A84FF" stroke-width="0.5" stroke-linejoin="round"/>
           </svg>
         </div>
-        <span>AI 健康建议 <span style="font-size:13px;color:var(--text-secondary);font-weight:400">(可选)</span></span>
+        <span style="display:flex; align-items:center; gap:5px">
+          <span data-i18n="lTitle">AI 健康建议</span>
+          <span style="font-size:13px;color:var(--text-secondary);font-weight:400" data-i18n="lOptional">(可选)</span>
+        </span>
       </div>
-      <p class="card-desc">
+      <p class="card-desc" data-i18n-html="lDesc">
         配置后，小组件底部根据当日数据生成一句个性化建议。<br>
         不填则显示本地规则提示。支持任何 OpenAI 兼容服务。
       </p>
 
       <details class="howto">
-        <summary>如何获取 API Key？<span class="arrow"></span></summary>
-        <div class="body">
-          <ol>
-            <li>打开 <a id="ai-key-link" href="https://platform.deepseek.com/" target="_blank">DeepSeek 开放平台</a>，注册并登录</li>
-            <li>进入「<b>API Keys</b>」→「创建 API Key」，复制生成的 <code>sk-…</code> 密钥</li>
-            <li>Base URL 填 <code id="ai-url-code">https://api.deepseek.com</code>，模型填服务商提供的模型名（如 <code id="ai-model-code">deepseek-v4-flash</code>）</li>
-            <li>也可以选择「自定义」，手动填写任意 OpenAI 兼容服务的 Base URL 与 Key</li>
-            <li>注意：调用需账户有余额，欠费时提示不生成（自动回落到本地规则提示）</li>
-          </ol>
-        </div>
+        <summary>
+          <span data-i18n="lHowto">如何获取 API Key？</span>
+          <span class="arrow"></span>
+        </summary>
+        <div class="body"><ol data-i18n-html="lHowtoSteps">
+          <li>打开 <a id="ai-key-link" href="https://platform.deepseek.com/" target="_blank">DeepSeek 开放平台</a>，注册并登录</li>
+          <li>进入「<b>API Keys</b>」→「创建 API Key」，复制生成的 <code>sk-…</code> 密钥</li>
+          <li>Base URL 填 <code id="ai-url-code">https://api.deepseek.com</code>，模型填服务商提供的模型名（如 <code id="ai-model-code">deepseek-v4-flash</code>）</li>
+          <li>也可以选择「自定义」，手动填写任意 OpenAI 兼容服务的 Base URL 与 Key</li>
+          <li>注意：调用需账户有余额，欠费时提示不生成（自动回落到本地规则提示）</li>
+        </ol></div>
       </details>
 
       <div class="field">
-        <label>服务商</label>
+        <label data-i18n="labelProvider">服务商</label>
         <div class="select-wrap">
           <select id="lprov" onchange="applyProvider()">
-            <option value="deepseek" selected>DeepSeek</option>
-            <option value="openai">OpenAI</option>
-            <option value="moonshot">Moonshot Kimi</option>
-            <option value="siliconflow">硅基流动 SiliconFlow</option>
-            <option value="zhipu">智谱 GLM</option>
-            <option value="dashscope">通义千问</option>
-            <option value="custom">自定义</option>
+            <option value="deepseek" data-i18n="provDeepseek">DeepSeek</option>
+            <option value="openai" data-i18n="provOpenai">OpenAI</option>
+            <option value="moonshot" data-i18n="provMoonshot">Moonshot Kimi</option>
+            <option value="siliconflow" data-i18n="provSiliconflow">硅基流动 SiliconFlow</option>
+            <option value="zhipu" data-i18n="provZhipu">智谱 GLM</option>
+            <option value="dashscope" data-i18n="provDashscope">通义千问</option>
+            <option value="custom" data-i18n="provCustom">自定义</option>
           </select>
         </div>
-        <div class="prov-tip" id="prov-tip">选择服务商后自动填入 Base URL 与模型</div>
+        <div class="prov-tip" id="prov-tip" data-i18n="provTipDefault">选择服务商后自动填入 Base URL 与模型</div>
       </div>
 
       <div class="field">
-        <label>Base URL</label>
-        <input id="lurl" type="text" placeholder="https://api.deepseek.com" autocomplete="off" spellcheck="false" oninput="step(2)">
+        <label data-i18n="labelBaseUrl">Base URL</label>
+        <input id="lurl" type="text" placeholder="https://api.deepseek.com" autocomplete="off" spellcheck="false" data-i18n-ph="phBaseUrl">
       </div>
       <div class="field-row">
         <div class="field">
-          <label>API Key</label>
-          <input id="lkey" type="password" placeholder="sk-…" autocomplete="off" spellcheck="false" oninput="step(2)">
+          <label data-i18n="labelApiKey">API Key</label>
+          <input id="lkey" type="password" placeholder="sk-…" autocomplete="off" spellcheck="false" data-i18n-ph="phApiKey">
         </div>
         <div class="field">
-          <label>模型</label>
-          <input id="lmod" type="text" placeholder="deepseek-v4-flash" value="deepseek-v4-flash" autocomplete="off" spellcheck="false" oninput="step(2)">
+          <label data-i18n="labelModel">模型</label>
+          <input id="lmod" type="text" placeholder="deepseek-v4-flash" autocomplete="off" spellcheck="false" data-i18n-ph="phModel">
         </div>
       </div>
 
-      <!-- LLM API 延迟测试：用当前输入框的值（未保存也能测） -->
+      <!-- LLM API 延迟测试 -->
       <div class="test-row">
         <div class="test-info">
-          <span class="test-title">LLM API 延迟测试</span>
-          <span class="test-hint">用上方 Base URL / Key / 模型发一条最小请求，验证是否生效并测量延迟。</span>
+          <span class="test-title" data-i18n="testLlmTitle">LLM API 延迟测试</span>
+          <span class="test-hint" data-i18n="testLlmHint">用上方 Base URL / Key / 模型发一条最小请求，验证是否生效并测量延迟。</span>
         </div>
-        <button type="button" class="btn-test" id="test-llm-btn" onclick="testApi('llm')">测试</button>
+        <button type="button" class="btn-test" id="test-llm-btn" data-i18n="testBtn" onclick="testApi('llm')">测试</button>
         <div class="test-result" id="test-llm-result"></div>
       </div>
-    </div>
 
-    <!-- Security note -->
-    <div class="secure-note">
-      <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
-        <path d="M8 1.5L2 4v4c0 3.314 2.686 6.14 6 7 3.314-.86 6-3.686 6-7V4L8 1.5z" stroke="currentColor" stroke-width="1.3" stroke-linejoin="round"/>
-        <path d="M5.5 8l1.75 1.75L10.5 6" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"/>
-      </svg>
-      <span>所有数据完全保存在本地，不会上传至任何服务器。账号凭据仅用于获取健康数据授权。</span>
+      <div class="actions">
+        <button type="button" class="btn-ghost" id="back-btn" data-i18n="btnBack" onclick="gotoStep(1)">上一步</button>
+        <span class="status-msg" id="status2"></span>
+        <button class="btn" id="save2-btn" data-i18n="btnDone" onclick="saveStep(2)">保存并完成</button>
+      </div>
     </div>
+  </div>
 
-    <!-- Action -->
-    <div class="actions">
-      <span class="status-msg" id="status"></span>
-      <button class="btn" id="save-btn" onclick="handleSave()">保存并应用</button>
-    </div>
-
-  </form>
+  <!-- Security note -->
+  <div class="secure-note" id="secureNote">
+    <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
+      <path d="M8 1.5L2 4v4c0 3.314 2.686 6.14 6 7 3.314-.86 6-3.686 6-7V4L8 1.5z" stroke="currentColor" stroke-width="1.3" stroke-linejoin="round"/>
+      <path d="M5.5 8l1.75 1.75L10.5 6" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"/>
+    </svg>
+    <span data-i18n="secureNote">所有数据完全保存在本地，不会上传至任何服务器。账号凭据仅用于获取健康数据授权。</span>
+  </div>
 
   <!-- Success -->
   <div id="success">
@@ -667,28 +739,145 @@
           stroke-dasharray="60" stroke-dashoffset="60"/>
       </svg>
     </div>
-    <h2>设置已保存</h2>
-    <p>小组件已收到更新。若配置了 Google 账号，数据将在下次刷新周期自动同步。关闭此页返回桌面即可。</p>
-    <button class="btn-ghost" onclick="window.close()">关闭此页</button>
+    <h2 data-i18n="successTitle">设置已保存</h2>
+    <p data-i18n="successDesc">小组件已收到更新。若配置了 Google 账号，数据将在下次刷新周期自动同步。关闭此页返回桌面即可。</p>
+    <button class="btn-ghost" data-i18n="btnClose" onclick="window.close()">关闭此页</button>
   </div>
 
 </div>
 
 <footer>
-  健康小组件 · 数据完全保存在本地<br>
+  <span data-i18n="footerLine">健康小组件 · 数据完全保存在本地</span><br>
   <a href="https://github.com/ARRIIIIIS/google-health-dashboard" target="_blank">github.com/ARRIIIIIS/google-health-dashboard</a>
 </footer>
 
 <script>
-  /* 主流 OpenAI 兼容服务商预设：切换时自动填入 Base URL / 模型，并同步「如何获取」链接 */
+  /* ── i18n ── */
+  var I18N = {
+    title: { zh: "设置向导", en: "Setup Wizard", ja: "セットアップウィザード" },
+    subtitle: { zh: "配置 Google 健康数据与 AI 建议<br>所有内容仅保存在本机", en: "Configure Google health data &amp; AI tips<br>Everything stays on this device", ja: "Google の健康データと AI アドバイスを設定<br>すべてのデータは端末内に保存" },
+    step1: { zh: "Google 健康数据", en: "Google Health Data", ja: "Google 健康データ" },
+    step2: { zh: "AI 健康建议", en: "AI Health Tips", ja: "AI ヘルスアドバイス" },
+    gTitle: { zh: "Google 健康数据", en: "Google Health Data", ja: "Google 健康データ" },
+    gDesc: { zh: "从 Google 同步步数、心率、睡眠等数据。<br>需要 OAuth 2.0 凭据，按下方步骤 5 分钟即可完成。", en: "Sync steps, heart rate, sleep &amp; more from Google.<br>Requires OAuth 2.0 credentials — about 5 minutes.", ja: "歩数・心拍・睡眠などのデータを Google から同期。<br>OAuth 2.0 認証情報が必要です（約 5 分）。" },
+    gHowto: { zh: "如何获取 Client ID 与 Secret？", en: "How to get Client ID & Secret?", ja: "Client ID と Secret の取得方法は？" },
+    gHowtoSteps: {
+      zh: '<li>打开 <a href="https://console.cloud.google.com/" target="_blank">Google Cloud Console</a> 并登录你的 Google 账号</li><li>顶部选择或新建一个项目，然后搜索并启用 <b>Fitness API</b></li><li>进入「API 和服务 → 凭据 → 创建凭据 → <b>OAuth 客户端 ID</b>」</li><li>应用类型选择 <b>桌面应用</b>，点击「创建」</li><li>复制页面上的 <b>Client ID</b> 与 <b>Client Secret</b>，填入下方输入框</li>',
+      en: '<li>Open <a href="https://console.cloud.google.com/" target="_blank">Google Cloud Console</a> and sign in</li><li>Select or create a project, then search and enable the <b>Fitness API</b></li><li>Go to "APIs &amp; Services → Credentials → Create credentials → <b>OAuth client ID</b>"</li><li>Choose application type <b>Desktop app</b>, then click "Create"</li><li>Copy the <b>Client ID</b> and <b>Client Secret</b> into the fields below</li>',
+      ja: '<li><a href="https://console.cloud.google.com/" target="_blank">Google Cloud Console</a> を開いてログイン</li><li>プロジェクトを選択・作成し、<b>Fitness API</b> を検索して有効化</li><li>「API とサービス → 認証情報 → 認証情報を作成 → <b>OAuth クライアント ID</b>」</li><li>アプリケーションタイプで <b>デスクトップアプリ</b> を選び「作成」</li><li><b>Client ID</b> と <b>Client Secret</b> をコピーして下の欄に入力</li>'
+    },
+    labelClientId: { zh: "Client ID", en: "Client ID", ja: "Client ID" },
+    labelClientSecret: { zh: "Client Secret", en: "Client Secret", ja: "Client Secret" },
+    phClientId: { zh: "xxxx.apps.googleusercontent.com", en: "xxxx.apps.googleusercontent.com", ja: "xxxx.apps.googleusercontent.com" },
+    phClientSecret: { zh: "GOCSAX-xxxx", en: "GOCSAX-xxxx", ja: "GOCSAX-xxxx" },
+    testDataTitle: { zh: "数据 API 延迟测试", en: "Data API latency test", ja: "データ API レイテンシテスト" },
+    testDataHint: { zh: "验证 Google 健康接口凭证是否有效，并测量往返延迟。", en: "Verify your Google health credentials and measure round-trip latency.", ja: "Google 健康 API の認証情報を検証し、往復レイテンシを測定します。" },
+    lTitle: { zh: "AI 健康建议", en: "AI Health Tips", ja: "AI ヘルスアドバイス" },
+    lOptional: { zh: "(可选)", en: "(optional)", ja: "（任意）" },
+    lDesc: { zh: "配置后，小组件底部根据当日数据生成一句个性化建议。<br>不填则显示本地规则提示。支持任何 OpenAI 兼容服务。", en: "Generate a personalized tip from today's data at the bottom of the widget.<br>Leave blank to use local rule-based tips. Works with any OpenAI-compatible service.", ja: "設定すると、ウィジェット下部に当日データから個別アドバイスを生成。<br>未入力ならローカルルールのヒントを表示。任意の OpenAI 互換サービスに対応。" },
+    lHowto: { zh: "如何获取 API Key？", en: "How to get an API Key?", ja: "API キーの取得方法は？" },
+    lHowtoSteps: {
+      zh: '<li>打开 <a id="ai-key-link" href="https://platform.deepseek.com/" target="_blank">DeepSeek 开放平台</a>，注册并登录</li><li>进入「<b>API Keys</b>」→「创建 API Key」，复制生成的 <code>sk-…</code> 密钥</li><li>Base URL 填 <code id="ai-url-code">https://api.deepseek.com</code>，模型填服务商提供的模型名（如 <code id="ai-model-code">deepseek-v4-flash</code>）</li><li>也可以选择「自定义」，手动填写任意 OpenAI 兼容服务的 Base URL 与 Key</li><li>注意：调用需账户有余额，欠费时提示不生成（自动回落到本地规则提示）</li>',
+      en: '<li>Open <a id="ai-key-link" href="https://platform.deepseek.com/" target="_blank">DeepSeek Platform</a>, sign up and sign in</li><li>Go to "<b>API Keys</b>" → "Create API Key", then copy the generated <code>sk-…</code> key</li><li>Set Base URL to <code id="ai-url-code">https://api.deepseek.com</code>, and Model to the provider\'s model name (e.g. <code id="ai-model-code">deepseek-v4-flash</code>)</li><li>Or choose "Custom" to manually enter any OpenAI-compatible Base URL and Key</li><li>Note: your account needs balance; when it runs out, tips fall back to local rules</li>',
+      ja: '<li><a id="ai-key-link" href="https://platform.deepseek.com/" target="_blank">DeepSeek プラットフォーム</a> を開いて登録・ログイン</li><li>「<b>API Keys</b>」→「API キーを作成」で、生成された <code>sk-…</code> キーをコピー</li><li>Base URL に <code id="ai-url-code">https://api.deepseek.com</code>、Model にプロバイダのモデル名（例 <code id="ai-model-code">deepseek-v4-flash</code>）を入力</li><li>「カスタム」を選べば任意の OpenAI 互換サービスの Base URL と Key を手入力できます</li><li>注意：アカウントに残高が必要。残高切れの場合はローカルルールにフォールバックします</li>'
+    },
+    labelProvider: { zh: "服务商", en: "Provider", ja: "プロバイダ" },
+    labelBaseUrl: { zh: "Base URL", en: "Base URL", ja: "Base URL" },
+    labelApiKey: { zh: "API Key", en: "API Key", ja: "API キー" },
+    labelModel: { zh: "模型", en: "Model", ja: "モデル" },
+    phBaseUrl: { zh: "https://api.deepseek.com", en: "https://api.deepseek.com", ja: "https://api.deepseek.com" },
+    phApiKey: { zh: "sk-…", en: "sk-…", ja: "sk-…" },
+    phModel: { zh: "deepseek-v4-flash", en: "deepseek-v4-flash", ja: "deepseek-v4-flash" },
+    provDeepseek: { zh: "DeepSeek", en: "DeepSeek", ja: "DeepSeek" },
+    provOpenai: { zh: "OpenAI", en: "OpenAI", ja: "OpenAI" },
+    provMoonshot: { zh: "Moonshot Kimi", en: "Moonshot Kimi", ja: "Moonshot Kimi" },
+    provSiliconflow: { zh: "硅基流动 SiliconFlow", en: "SiliconFlow", ja: "SiliconFlow" },
+    provZhipu: { zh: "智谱 GLM", en: "Zhipu GLM", ja: "Zhipu GLM" },
+    provDashscope: { zh: "通义千问", en: "Qwen (Tongyi)", ja: "Qwen (Tongyi)" },
+    provCustom: { zh: "自定义", en: "Custom", ja: "カスタム" },
+    keyDeepseek: { zh: "DeepSeek 开放平台", en: "DeepSeek Platform", ja: "DeepSeek プラットフォーム" },
+    keyOpenai: { zh: "OpenAI Platform", en: "OpenAI Platform", ja: "OpenAI Platform" },
+    keyMoonshot: { zh: "Moonshot 开放平台", en: "Moonshot Platform", ja: "Moonshot プラットフォーム" },
+    keySiliconflow: { zh: "硅基流动", en: "SiliconFlow", ja: "SiliconFlow" },
+    keyZhipu: { zh: "智谱 AI 开放平台", en: "Zhipu AI Platform", ja: "Zhipu AI プラットフォーム" },
+    keyDashscope: { zh: "阿里云百炼", en: "Alibaba Cloud Bailian", ja: "Alibaba Cloud Bailian" },
+    provTipDefault: { zh: "选择服务商后自动填入 Base URL 与模型", en: "Base URL & model are filled automatically after selecting a provider", ja: "プロバイダ選択後、Base URL とモデルが自動入力されます" },
+    provTipCustom: { zh: "自行填写 Base URL / API Key / 模型名", en: "Fill in Base URL / API Key / model name manually", ja: "Base URL / API キー / モデル名を手入力してください" },
+    provTipSet: { zh: '已填入 <b>{name}</b> 的 Base URL 与模型，粘贴 API Key 即可', en: 'Filled in <b>{name}</b>\'s Base URL & model — paste your API Key to finish', ja: '<b>{name}</b> の Base URL とモデルを入力済み。API キーを貼り付けるだけです' },
+    provTipCurrent: { zh: '当前使用 <b>{name}</b> 预设，可切换服务商', en: 'Currently using the <b>{name}</b> preset — you can switch providers', ja: '現在 <b>{name}</b> のプリセットを使用中。プロバイダを切り替えられます' },
+    testLlmTitle: { zh: "LLM API 延迟测试", en: "LLM API latency test", ja: "LLM API レイテンシテスト" },
+    testLlmHint: { zh: "用上方 Base URL / Key / 模型发一条最小请求，验证是否生效并测量延迟。", en: "Send a minimal request with the Base URL / Key / model above to verify it works and measure latency.", ja: "上の Base URL / Key / モデルで最小リクエストを送り、有効性とレイテンシを検証します。" },
+    secureNote: { zh: "所有数据完全保存在本地，不会上传至任何服务器。账号凭据仅用于获取健康数据授权。", en: "All data stays on this device — nothing is uploaded to any server. Credentials are used only to authorize health data access.", ja: "すべてのデータは端末内に保存され、サーバーには一切アップロードされません。認証情報は健康データの認可にのみ使用します。" },
+    btnNext: { zh: "保存并下一步", en: "Save & Next", ja: "保存して次へ" },
+    btnDone: { zh: "保存并完成", en: "Save & Finish", ja: "保存して完了" },
+    btnBack: { zh: "上一步", en: "Back", ja: "戻る" },
+    statusSaving: { zh: "保存中…", en: "Saving…", ja: "保存中…" },
+    statusSavedNext: { zh: "已保存，进入下一步", en: "Saved, next step", ja: "保存しました。次へ" },
+    statusSavedDone: { zh: "已保存，小组件已更新", en: "Saved — widget updated", ja: "保存しました。ウィジェット更新済み" },
+    statusFail: { zh: "保存失败：", en: "Save failed: ", ja: "保存に失敗：" },
+    statusConnFail: { zh: "连接失败：", en: "Connection failed: ", ja: "接続に失敗：" },
+    testBtn: { zh: "测试", en: "Test", ja: "テスト" },
+    testRunning: { zh: "测试中…", en: "Testing…", ja: "テスト中…" },
+    testOk: { zh: "测试成功", en: "Test OK", ja: "テスト成功" },
+    testRetry: { zh: "重新测试", en: "Retry", ja: "再テスト" },
+    testOkResult: { zh: "正常 · ", en: "OK · ", ja: "正常 · " },
+    testFailResult: { zh: "失败 · ", en: "Failed · ", ja: "失敗 · " },
+    testConnFail: { zh: "连接失败：", en: "Connection failed: ", ja: "接続に失敗：" },
+    testConnFailSuffix: { zh: "（设置页服务未运行？）", en: "(setup service not running?)", ja: "（セットアップサービスが未起動？）" },
+    successTitle: { zh: "设置已保存", en: "Settings Saved", ja: "設定を保存しました" },
+    successDesc: { zh: "小组件已收到更新。若配置了 Google 账号，数据将在下次刷新周期自动同步。关闭此页返回桌面即可。", en: "The widget has received the update. If a Google account is configured, data will sync on the next refresh cycle. Close this page to return to your desktop.", ja: "ウィジェットに更新が反映されました。Google アカウントを設定した場合、次の更新サイクルでデータが同期されます。このページを閉じてデスクトップへ戻ってください。" },
+    btnClose: { zh: "关闭此页", en: "Close this page", ja: "このページを閉じる" },
+    footerLine: { zh: "健康小组件 · 数据完全保存在本地", en: "Health Widget · Data stays on this device", ja: "ヘルスウィジェット · データは端末内に保存" }
+  };
+
+  var LANG = 'zh';
+  try { LANG = localStorage.getItem('setup-lang') || 'zh'; } catch (e) {}
+
+  function t(key) {
+    var o = I18N[key];
+    if (!o) return key;
+    return o[LANG] !== undefined ? o[LANG] : (o.zh || key);
+  }
+
+  function applyLang() {
+    document.documentElement.lang = LANG === 'zh' ? 'zh-CN' : (LANG === 'ja' ? 'ja' : 'en');
+    document.title = t('title') + ' · 健康小组件';
+    // 文本
+    document.querySelectorAll('[data-i18n]').forEach(function (el) {
+      el.textContent = t(el.getAttribute('data-i18n'));
+    });
+    // 富文本
+    document.querySelectorAll('[data-i18n-html]').forEach(function (el) {
+      el.innerHTML = t(el.getAttribute('data-i18n-html'));
+    });
+    // placeholder
+    document.querySelectorAll('[data-i18n-ph]').forEach(function (el) {
+      el.setAttribute('placeholder', t(el.getAttribute('data-i18n-ph')));
+    });
+    // 语言按钮高亮
+    document.querySelectorAll('.lang-btn').forEach(function (b) {
+      b.classList.toggle('active', b.getAttribute('data-lang') === LANG);
+    });
+    // 服务商动态文案（重新生成，覆盖 howto 里被 innerHTML 重置的动态节点）
+    applyProvider();
+  }
+
+  function setLang(l) {
+    if (l === LANG) return;
+    LANG = l;
+    try { localStorage.setItem('setup-lang', l); } catch (e) {}
+    applyLang();
+  }
+
+  /* ── 服务商预设 ── */
   var PROVIDERS = {
-    deepseek:    { url: "https://api.deepseek.com",                           model: "deepseek-v4-flash",       name: "DeepSeek",         keyName: "DeepSeek 开放平台", keyUrl: "https://platform.deepseek.com/" },
-    openai:      { url: "https://api.openai.com/v1",                          model: "gpt-4o-mini",             name: "OpenAI",           keyName: "OpenAI Platform", keyUrl: "https://platform.openai.com/api-keys" },
-    moonshot:    { url: "https://api.moonshot.cn/v1",                         model: "moonshot-v1-8k",          name: "Moonshot Kimi",    keyName: "Moonshot 开放平台", keyUrl: "https://platform.moonshot.cn/console/api-keys" },
-    siliconflow: { url: "https://api.siliconflow.cn/v1",                      model: "deepseek-ai/DeepSeek-V3", name: "硅基流动",         keyName: "硅基流动", keyUrl: "https://cloud.siliconflow.cn/account/ak" },
-    zhipu:       { url: "https://open.bigmodel.cn/api/paas/v4",               model: "glm-4-flash",             name: "智谱 GLM",         keyName: "智谱 AI 开放平台", keyUrl: "https://open.bigmodel.cn/usercenter/apikeys" },
-    dashscope:   { url: "https://dashscope.aliyuncs.com/compatible-mode/v1",  model: "qwen-plus",               name: "通义千问",         keyName: "阿里云百炼", keyUrl: "https://bailian.console.aliyun.com/?apiKey=1" },
-    custom:      { url: "", model: "", name: "自定义", keyName: "", keyUrl: "" }
+    deepseek:    { url: "https://api.deepseek.com",                           model: "deepseek-v4-flash",       name: "provDeepseek",    keyName: "keyDeepseek",    keyUrl: "https://platform.deepseek.com/" },
+    openai:      { url: "https://api.openai.com/v1",                          model: "gpt-4o-mini",             name: "provOpenai",      keyName: "keyOpenai",      keyUrl: "https://platform.openai.com/api-keys" },
+    moonshot:    { url: "https://api.moonshot.cn/v1",                         model: "moonshot-v1-8k",          name: "provMoonshot",    keyName: "keyMoonshot",    keyUrl: "https://platform.moonshot.cn/console/api-keys" },
+    siliconflow: { url: "https://api.siliconflow.cn/v1",                      model: "deepseek-ai/DeepSeek-V3", name: "provSiliconflow", keyName: "keySiliconflow", keyUrl: "https://cloud.siliconflow.cn/account/ak" },
+    zhipu:       { url: "https://open.bigmodel.cn/api/paas/v4",               model: "glm-4-flash",             name: "provZhipu",       keyName: "keyZhipu",       keyUrl: "https://open.bigmodel.cn/usercenter/apikeys" },
+    dashscope:   { url: "https://dashscope.aliyuncs.com/compatible-mode/v1",  model: "qwen-plus",               name: "provDashscope",   keyName: "keyDashscope",   keyUrl: "https://bailian.console.aliyun.com/?apiKey=1" },
+    custom:      { url: "", model: "", name: "provCustom", keyName: "", keyUrl: "" }
   };
 
   function detectProvider(url) {
@@ -703,54 +892,70 @@
   }
 
   function applyProvider() {
-    var key = document.getElementById('lprov').value;
+    var sel = document.getElementById('lprov');
+    var key = sel.value;
     var p = PROVIDERS[key] || PROVIDERS.custom;
-    document.getElementById('lurl').value = p.url;
-    document.getElementById('lmod').value = p.model;
+    // 仅在手动切换服务商时回填 URL/模型；初始化（语言切换触发的重绘）不覆盖已填值
+    if (applyProvider._lastKey !== key) {
+      document.getElementById('lurl').value = p.url;
+      document.getElementById('lmod').value = p.model;
+      applyProvider._lastKey = key;
+    }
     var tip = document.getElementById('prov-tip');
     var link = document.getElementById('ai-key-link');
     var urlCode = document.getElementById('ai-url-code');
     var modelCode = document.getElementById('ai-model-code');
     if (key === 'custom') {
-      tip.innerHTML = '自行填写 Base URL / API Key / 模型名';
-      link.textContent = '你的 API 服务商官网';
+      tip.innerHTML = t('provTipCustom');
+      link.textContent = t('provCustom');
       link.href = '#';
       urlCode.textContent = 'https://…/v1';
-      modelCode.textContent = '服务商文档中的模型名';
+      modelCode.textContent = t('provCustom');
     } else {
-      tip.innerHTML = '已填入 <b>' + p.name + '</b> 的 Base URL 与模型，粘贴 API Key 即可';
-      link.textContent = p.keyName;
+      tip.innerHTML = t('provTipSet').replace('{name}', t(p.name));
+      link.textContent = t(p.keyName);
       link.href = p.keyUrl;
       urlCode.textContent = p.url;
       modelCode.textContent = p.model;
     }
-    step(2);
   }
 
-  function step(n) {
-    var dots = document.querySelectorAll('.dot');
-    dots.forEach(function(d, i) {
-      d.classList.remove('active', 'done');
-      if (i + 1 < n) d.classList.add('done');
-      else if (i + 1 === n) d.classList.add('active');
-    });
+  /* ── 分步导航 ── */
+  function gotoStep(n) {
+    document.getElementById('step1').style.display = n === 1 ? '' : 'none';
+    document.getElementById('step2').style.display = n === 2 ? '' : 'none';
+    var n1 = document.getElementById('stepNode1');
+    var n2 = document.getElementById('stepNode2');
+    var bar = document.getElementById('stepBar');
+    n1.classList.toggle('active', n === 1);
+    n2.classList.toggle('active', n === 2);
+    // done 状态：已保存过的步骤打勾
+    if (n === 2) { n1.classList.add('done'); n1.classList.remove('active'); }
+    bar.classList.toggle('filled', n === 2);
+    window.scrollTo({ top: 0, behavior: 'smooth' });
   }
 
-  function setStatus(msg, kind) {
-    var el = document.getElementById('status');
+  function setStatus(id, msg, kind) {
+    var el = document.getElementById(id);
     el.textContent = msg;
     el.className = 'status-msg' + (kind ? ' ' + kind : '');
   }
 
   function showSuccess() {
-    document.getElementById('form').style.display = 'none';
-    document.querySelector('.progress').style.display = 'none';
+    document.getElementById('step1').style.display = 'none';
+    document.getElementById('step2').style.display = 'none';
+    document.querySelector('.stepper').style.display = 'none';
+    document.getElementById('secureNote').style.display = 'none';
     var v = document.getElementById('success');
     v.classList.add('show');
-    document.querySelectorAll('.dot').forEach(function(d) { d.classList.add('done'); d.classList.remove('active'); });
+    var n1 = document.getElementById('stepNode1');
+    var n2 = document.getElementById('stepNode2');
+    n1.classList.add('done'); n1.classList.remove('active');
+    n2.classList.add('done'); n2.classList.remove('active');
+    window.scrollTo({ top: 0 });
   }
 
-  /* ── API 延迟测试：数据 API（Google）与 LLM API 各自独立 ── */
+  /* ── API 延迟测试 ── */
   var TESTING = { data: false, llm: false };
 
   function setTestResult(kind, msg, cls) {
@@ -766,12 +971,11 @@
     TESTING[kind] = true;
     var btn = document.getElementById('test-' + kind + '-btn');
     btn.disabled = true;
-    btn.textContent = '测试中…';
+    btn.textContent = t('testRunning');
     setTestResult(kind, '', '');
 
     var payload = {};
     if (kind === 'llm') {
-      // 用页面当前输入值，未保存也能测；留空的字段由后端回落到已保存设置
       payload = {
         base_url: document.getElementById('lurl').value.trim(),
         api_key:  document.getElementById('lkey').value.trim(),
@@ -790,30 +994,32 @@
       var wall = Date.now() - t0;
       var ms = (typeof d.ms === 'number' && d.ms > 0) ? d.ms : wall;
       if (d.ok) {
-        setTestResult(kind, '正常 · ' + ms + ' ms · ' + (d.detail || ''), 'ok');
-        btn.textContent = '测试成功';
+        setTestResult(kind, t('testOkResult') + ms + ' ms · ' + (d.detail || ''), 'ok');
+        btn.textContent = t('testOk');
       } else {
-        setTestResult(kind, '失败 · ' + ms + ' ms · ' + (d.detail || '未知错误'), 'err');
-        btn.textContent = '重新测试';
+        setTestResult(kind, t('testFailResult') + ms + ' ms · ' + (d.detail || '?'), 'err');
+        btn.textContent = t('testRetry');
       }
     } catch (e) {
-      setTestResult(kind, '连接失败：' + e.message + '（设置页服务未运行？）', 'err');
-      btn.textContent = '重新测试';
+      setTestResult(kind, t('testConnFail') + e.message + t('testConnFailSuffix'), 'err');
+      btn.textContent = t('testRetry');
     }
     btn.disabled = false;
     TESTING[kind] = false;
   }
 
-  async function handleSave() {
-    var btn = document.getElementById('save-btn');
+  /* ── 分步保存：只传当前步骤字段（后端为增量合并，不会清空另一组）── */
+  async function saveStep(n) {
+    var btn = document.getElementById(n === 1 ? 'save1-btn' : 'save2-btn');
     btn.disabled = true;
-    setStatus('保存中…', 'info');
-    var payload = {
+    setStatus(n === 1 ? 'status1' : 'status2', t('statusSaving'), 'info');
+    var payload = n === 1 ? {
       google_client_id:     document.getElementById('gid').value.trim(),
       google_client_secret: document.getElementById('gsec').value.trim(),
-      llm_base_url:       document.getElementById('lurl').value.trim(),
-      llm_api_key:        document.getElementById('lkey').value.trim(),
-      llm_model:          document.getElementById('lmod').value.trim(),
+    } : {
+      llm_base_url: document.getElementById('lurl').value.trim(),
+      llm_api_key:  document.getElementById('lkey').value.trim(),
+      llm_model:    document.getElementById('lmod').value.trim(),
     };
     try {
       var res = await fetch('/api/save', {
@@ -823,45 +1029,47 @@
       });
       var data = await res.json().catch(function(){ return {}; });
       if (data && data.ok) {
-        setStatus('已保存，小组件已更新', 'ok');
-        setTimeout(showSuccess, 700);
+        if (n === 1) {
+          setStatus('status1', t('statusSavedNext'), 'ok');
+          setTimeout(function () { gotoStep(2); }, 450);
+        } else {
+          setStatus('status2', t('statusSavedDone'), 'ok');
+          setTimeout(showSuccess, 700);
+        }
       } else {
-        setStatus('保存失败：' + (data.error || '未知错误'), 'err');
+        setStatus(n === 1 ? 'status1' : 'status2', t('statusFail') + (data.error || '?'), 'err');
         btn.disabled = false;
       }
-    } catch(e) {
-      setStatus('连接失败：' + e.message, 'err');
+    } catch (e) {
+      setStatus(n === 1 ? 'status1' : 'status2', t('statusConnFail') + e.message, 'err');
       btn.disabled = false;
     }
   }
 
-  // 初始化：默认选中的服务商同步填入预设值
+  // 语言切换按钮
+  document.querySelectorAll('.lang-btn').forEach(function (b) {
+    b.addEventListener('click', function () { setLang(b.getAttribute('data-lang')); });
+  });
+
+  // 初始化：应用语言 + 默认服务商
+  applyLang();
   applyProvider();
 
   // 预填
   fetch('/api/load')
     .then(function(r){ return r.ok ? r.json() : {}; })
     .then(function(d) {
-      var g1 = document.getElementById('gid');
-      var g2 = document.getElementById('gsec');
-      var l1 = document.getElementById('lurl');
-      var l2 = document.getElementById('lkey');
-      var l3 = document.getElementById('lmod');
-      if (d.google_client_id)     { g1.value = d.google_client_id; step(1); }
-      if (d.google_client_secret){ g2.value = d.google_client_secret; step(1); }
-      if (d.llm_base_url)       { l1.value = d.llm_base_url; step(2); }
-      if (d.llm_api_key)        { l2.value = d.llm_api_key; step(2); }
-      if (d.llm_model)          { l3.value = d.llm_model; step(2); }
-      if (d.google_client_id || d.llm_base_url) { step(2); }
+      if (d.google_client_id)      document.getElementById('gid').value = d.google_client_id;
+      if (d.google_client_secret)  document.getElementById('gsec').value = d.google_client_secret;
+      if (d.llm_base_url)          document.getElementById('lurl').value = d.llm_base_url;
+      if (d.llm_api_key)           document.getElementById('lkey').value = d.llm_api_key;
+      if (d.llm_model)             document.getElementById('lmod').value = d.llm_model;
       // 根据已存 Base URL 推断服务商（只更新下拉与引导，不覆盖已存的自定义值）
       var prov = detectProvider(d.llm_base_url);
       if (prov && prov !== 'custom' && PROVIDERS[prov]) {
         document.getElementById('lprov').value = prov;
-        document.getElementById('prov-tip').innerHTML = '当前使用 <b>' + PROVIDERS[prov].name + '</b> 预设，可切换服务商';
-        document.getElementById('ai-key-link').textContent = PROVIDERS[prov].keyName;
-        document.getElementById('ai-key-link').href = PROVIDERS[prov].keyUrl;
-        document.getElementById('ai-url-code').textContent = PROVIDERS[prov].url;
-        document.getElementById('ai-model-code').textContent = PROVIDERS[prov].model;
+        applyProvider._lastKey = null; // 允许 applyProvider 重新同步 URL/模型显示
+        applyProvider();
       }
     })
     .catch(function(){});

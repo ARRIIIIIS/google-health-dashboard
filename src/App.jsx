@@ -217,16 +217,101 @@ const C_PIXEL_LIGHT = {
   amber: "#ffd93d",
   alert: "#ff6b6b",
 };
+// ── Brutalist Web palette（网页粗野主义）────────────────────────────────────────
+// 纯白/纯黑实底 + 1px 硬边 + 零圆角零阴影零渐变；等宽正文 + 衬线标题，功能色受限。
+const C_BRUTAL_DARK = {
+  label: "#ffffff",
+  second: "#d9d9d9",
+  third: "#9a9a9a",
+  bg: "#000000",
+  card: "#101010",
+  hairline: "#ffffff",
+  rim: "#ffffff",
+  rimSoft: "#ffffff",
+  glassCtl: "#1a1a1a",
+  green: "#33cc33",
+  red: "#ff5555",
+  blue: "#6699ff",
+  teal: "#33cc33",
+  indigo: "#6699ff",
+  amber: "#ffd54a",
+  alert: "#ff5555",
+};
+const C_BRUTAL_LIGHT = {
+  label: "#000000",
+  second: "#333333",
+  third: "#6b6b6b",
+  bg: "#ffffff",
+  card: "#f4f4f4",
+  hairline: "#000000",
+  rim: "#000000",
+  rimSoft: "#000000",
+  glassCtl: "#dfdfdf",
+  green: "#008000",
+  red: "#ff0000",
+  blue: "#0000ff",
+  teal: "#008000",
+  indigo: "#0000ff",
+  amber: "#b8860b",
+  alert: "#ff0000",
+};
+// ── Developer Terminal palette（开发者终端）─────────────────────────────────────
+// 近黑/纸白实底 + 等宽字体 + 荧光绿；青/品红/琥珀为终端强调色，零阴影零渐变。
+const C_TERM_DARK = {
+  label: "#4AF626",
+  second: "#8BE9FD",
+  third: "#6272A4",
+  bg: "#0A0E12",
+  card: "#0D141B",
+  hairline: "#1F2937",
+  rim: "#1F2937",
+  rimSoft: "#1F2937",
+  glassCtl: "#0D141B",
+  green: "#4AF626",
+  red: "#FF79C6",
+  blue: "#8BE9FD",
+  teal: "#4AF626",
+  indigo: "#FF79C6",
+  amber: "#FFB86C",
+  alert: "#FF79C6",
+};
+const C_TERM_LIGHT = {
+  label: "#1D3B1D",
+  second: "#0E7C8A",
+  third: "#8899AA",
+  bg: "#FAFAF4",
+  card: "#FFFFFF",
+  hairline: "#E4E4DA",
+  rim: "#E4E4DA",
+  rimSoft: "#E4E4DA",
+  glassCtl: "#FFFFFF",
+  green: "#2F9E2F",
+  red: "#C2257A",
+  blue: "#0E7C8A",
+  teal: "#2F9E2F",
+  indigo: "#C2257A",
+  amber: "#9A6A00",
+  alert: "#C2257A",
+};
 // 当前生效调色板（随系统/设置切换）
 let C = C_DARK;
-// 按 (style, dark) 选调色板：液态玻璃走原 Apple 调色板，像素动漫风走 NES 实底
+// 按 (style, dark) 选调色板：液态玻璃走 Apple 调色板，其余走各自实底调色板
 function pickPalette(style, dark) {
   if (style === "pixel-anime") return dark ? C_PIXEL_DARK : C_PIXEL_LIGHT;
+  if (style === "brutalist-web") return dark ? C_BRUTAL_DARK : C_BRUTAL_LIGHT;
+  if (style === "developer-terminal") return dark ? C_TERM_DARK : C_TERM_LIGHT;
   return dark ? C_DARK : C_LIGHT;
 }
 // 像素动漫风开关（按 style 判定，不再依赖组件内 settingsRef）
 function isPixel(style) {
   return style === "pixel-anime";
+}
+// 网页粗野主义 / 开发者终端 风格开关
+function isBrutal(style) {
+  return style === "brutalist-web";
+}
+function isTerm(style) {
+  return style === "developer-terminal";
 }
 
 // 磨砂由系统 NSVisualEffectView 提供（HudWindow 材质），前端不再模拟噪点/高光
@@ -473,6 +558,9 @@ function SettingsPanel({ draft, setDraft, onSave, onCancel, busy, rerender, syst
 );
 }
 function Widget({ data, settings, character, onRefresh, onReset, justResetAt, sedPopRef, dndActive, bottomTip, forceWidgetPop, setForceWidgetPop }) {
+  const styleId = settings && settings.style;
+  const brutal = isBrutal(styleId);
+  const term = isTerm(styleId);
   const t = data.today || {};
   const steps = t.steps || 0;
   const active = t.active_minutes || 0;
@@ -568,32 +656,65 @@ function Widget({ data, settings, character, onRefresh, onReset, justResetAt, se
     </div>
   );
 
+  // 久坐弹窗四态样式集：像素（金黑 NES）/ 粗野（黑白硬边衬线）/ 终端（荧光绿细边等宽）/ 玻璃（磨砂）
+  const sedS = (function () {
+    if (isPixel(styleId)) {
+      return {
+        c: { position: "absolute", top: "calc(100% + 18px)", left: "50%", marginLeft: -93, width: 186, boxSizing: "border-box", zIndex: 50, borderRadius: 0, padding: "9px 11px 8px", background: C.amber, border: "2px solid #1a1040", boxShadow: "4px 4px 0 #1a1040", fontFamily: "ui-monospace, 'SF Mono', Menlo, Monaco, monospace", display: showSedPop ? "block" : "none", animation: "sed-pop .15s steps(4)" },
+        a: { position: "absolute", top: -5, left: "50%", marginLeft: -5, width: 10, height: 10, background: C.amber, border: "2px solid #1a1040", borderRight: "none", borderBottom: "none" },
+        t: { fontSize: 10.5, fontWeight: 700, color: "#1a1040", fontFamily: "ui-monospace, monospace", textTransform: "uppercase", letterSpacing: 0.5, display: "flex", alignItems: "center", gap: 5 },
+        h: { fontSize: 8.5, color: "#1a1040", fontFamily: "ui-monospace, monospace", marginTop: 2 },
+        l: { flex: 1, textAlign: "center", fontSize: 9, fontWeight: 700, color: "#1a1040", fontFamily: "ui-monospace, monospace", textTransform: "uppercase", border: "2px solid #1a1040", padding: "3px 0", borderRadius: 0, cursor: "pointer" },
+        o: { flex: 1, textAlign: "center", fontSize: 9, fontWeight: 700, color: "#fff", fontFamily: "ui-monospace, monospace", textTransform: "uppercase", background: "#1a1040", border: "2px solid #1a1040", padding: "3px 0", borderRadius: 0, cursor: "pointer" },
+      };
+    }
+    if (brutal) {
+      const ink = C.hairline;
+      return {
+        c: { position: "absolute", top: "calc(100% + 18px)", left: "50%", marginLeft: -93, width: 186, boxSizing: "border-box", zIndex: 50, borderRadius: 0, padding: "9px 11px 8px", background: C.card, border: "2px solid " + ink, boxShadow: "4px 4px 0 " + C.rim, fontFamily: "'Courier New', Courier, monospace", display: showSedPop ? "block" : "none", animation: "sed-pop .15s ease" },
+        a: { position: "absolute", top: -6, left: "50%", marginLeft: -6, width: 10, height: 10, background: C.card, border: "2px solid " + ink, borderRight: "none", borderBottom: "none" },
+        t: { fontSize: 10.5, fontWeight: 700, color: C.label, fontFamily: "Georgia, 'Times New Roman', serif", letterSpacing: 0.2, display: "flex", alignItems: "center", gap: 5 },
+        h: { fontSize: 8.5, color: C.second, fontFamily: "'Courier New', Courier, monospace", marginTop: 2 },
+        l: { flex: 1, textAlign: "center", fontSize: 9, fontWeight: 700, color: C.label, fontFamily: "'Courier New', Courier, monospace", border: "2px solid " + ink, padding: "3px 0", borderRadius: 0, cursor: "pointer", background: C.bg },
+        o: { flex: 1, textAlign: "center", fontSize: 9, fontWeight: 700, color: C.bg, fontFamily: "'Courier New', Courier, monospace", background: C.label, border: "2px solid " + ink, padding: "3px 0", borderRadius: 0, cursor: "pointer" },
+      };
+    }
+    if (term) {
+      return {
+        c: { position: "absolute", top: "calc(100% + 18px)", left: "50%", marginLeft: -93, width: 186, boxSizing: "border-box", zIndex: 50, borderRadius: 3, padding: "9px 11px 8px", background: C.card, border: "1px solid " + C.hairline, boxShadow: "none", fontFamily: "ui-monospace, 'SF Mono', Menlo, Monaco, monospace", display: showSedPop ? "block" : "none", animation: "sed-pop .15s ease" },
+        a: { position: "absolute", top: -5, left: "50%", marginLeft: -5, width: 10, height: 10, background: C.card, border: "1px solid " + C.hairline, borderRight: "none", borderBottom: "none" },
+        t: { fontSize: 10.5, fontWeight: 700, color: C.green, fontFamily: "ui-monospace, 'SF Mono', Menlo, Monaco, monospace", letterSpacing: 0.2, display: "flex", alignItems: "center", gap: 5 },
+        h: { fontSize: 8.5, color: C.second, fontFamily: "ui-monospace, monospace", marginTop: 2 },
+        l: { flex: 1, textAlign: "center", fontSize: 9, fontWeight: 700, color: C.second, fontFamily: "ui-monospace, monospace", border: "1px solid " + C.hairline, padding: "3px 0", borderRadius: 3, cursor: "pointer", background: "transparent" },
+        o: { flex: 1, textAlign: "center", fontSize: 9, fontWeight: 700, color: C.bg, fontFamily: "ui-monospace, monospace", background: C.green, border: "1px solid " + C.green, padding: "3px 0", borderRadius: 3, cursor: "pointer" },
+      };
+    }
+    return {
+      c: { position: "absolute", top: "calc(100% + 18px)", left: "50%", marginLeft: -93, width: 186, boxSizing: "border-box", zIndex: 50, borderRadius: 12, padding: "9px 11px 8px", background: "rgba(38,30,18,0.92)", backdropFilter: "blur(20px)", WebkitBackdropFilter: "blur(20px)", border: "1px solid rgba(255,159,10,0.45)", display: showSedPop ? "block" : "none", animation: "sed-pop .4s cubic-bezier(.2,.9,.3,1.15)" },
+      a: { position: "absolute", top: -4.5, left: "50%", marginLeft: -4.5, width: 9, height: 9, background: "rgba(38,30,18,0.92)", borderLeft: "1px solid rgba(255,159,10,0.45)", borderTop: "1px solid rgba(255,159,10,0.45)", transform: "rotate(45deg)" },
+      t: { fontSize: 10.5, fontWeight: 700, color: "#FF9F0A", letterSpacing: 0.2, display: "flex", alignItems: "center", gap: 5 },
+      h: { fontSize: 8.5, color: "rgba(255,159,10,0.65)", marginTop: 2 },
+      l: { flex: 1, textAlign: "center", fontSize: 9, fontWeight: 600, color: "rgba(255,159,10,0.65)", border: "1px solid rgba(255,159,10,0.35)", padding: "3px 0", borderRadius: 99, cursor: "pointer" },
+      o: { flex: 1, textAlign: "center", fontSize: 9, fontWeight: 600, color: "#0a0a0c", background: "#FF9F0A", padding: "4px 0", borderRadius: 99, cursor: "pointer" },
+    };
+  })();
+
   const idleChipWithPop = effIdle != null ? (
     <div style={{ position: "relative" }}>
-      <div data-tauri-drag-region="false" title={T("sedentaryThreshold")} onMouseDown={function (e) { e.preventDefault(); e.stopPropagation(); if (!effSed || !sedPopRef.current) return; const vis = sedPopRef.current.style.display !== "none"; sedPopRef.current.style.display = vis ? "none" : "block"; if (vis) dismissSedPop(); else { try { localStorage.removeItem(SED_POP_KEY); } catch (err) {} } }} style={{ display: "flex", alignItems: "center", gap: 5, height: 19, padding: "0 8px 0 6px", borderRadius: 99, flexShrink: 0, fontSize: 9, fontWeight: 600, letterSpacing: 0.2, fontVariantNumeric: "tabular-nums", cursor: effSed ? "pointer" : "default", ...(effSed ? { background: "rgba(255,159,10,0.16)", color: C.amber, animation: "sed-pulse 2.2s ease-in-out infinite" } : { background: C.card, color: C.third }) }}>
+      <div data-tauri-drag-region="false" title={T("sedentaryThreshold")} onMouseDown={function (e) { e.preventDefault(); e.stopPropagation(); if (!effSed || !sedPopRef.current) return; const vis = sedPopRef.current.style.display !== "none"; sedPopRef.current.style.display = vis ? "none" : "block"; if (vis) dismissSedPop(); else { try { localStorage.removeItem(SED_POP_KEY); } catch (err) {} } }} style={{ display: "flex", alignItems: "center", gap: 5, height: 19, padding: "0 8px 0 6px", borderRadius: brutal ? 0 : term ? 3 : 99, flexShrink: 0, fontSize: 9, fontWeight: 600, letterSpacing: 0.2, fontVariantNumeric: "tabular-nums", cursor: effSed ? "pointer" : "default", ...(effSed ? { background: "rgba(255,159,10,0.16)", color: C.amber, animation: "sed-pulse 2.2s ease-in-out infinite" } : { background: C.card, color: C.third }) }}>
         {ICO.chair}<span>{effIdle} min</span>
       </div>
       {effSed && effIdle != null && (
-        <div ref={function (el) { sedPopRef.current = el; }} style={ isPixel(settings && settings.style) ? {
-          // 像素风：金底实色 + 0 圆角 + 2px 黑边 + 硬边阴影（4px_4px_0）+ 等宽字体
-          position: "absolute", top: "calc(100% + 18px)", left: "50%", marginLeft: -93, width: 186, boxSizing: "border-box", zIndex: 50,
-          borderRadius: 0, padding: "9px 11px 8px",
-          background: C.amber, border: "2px solid #1a1040",
-          boxShadow: "4px 4px 0 #1a1040",
-          fontFamily: "ui-monospace, 'SF Mono', Menlo, Monaco, monospace",
-          display: showSedPop ? "block" : "none",
-          animation: "sed-pop .15s steps(4)",
-        } : {
-          position: "absolute", top: "calc(100% + 18px)", left: "50%", marginLeft: -93, width: 186, boxSizing: "border-box", zIndex: 50, borderRadius: 12, padding: "9px 11px 8px", background: "rgba(38,30,18,0.92)", backdropFilter: "blur(20px)", WebkitBackdropFilter: "blur(20px)", border: "1px solid rgba(255,159,10,0.45)", display: showSedPop ? "block" : "none", animation: "sed-pop .4s cubic-bezier(.2,.9,.3,1.15)",
-        } }>
-          <div style={ isPixel(settings && settings.style) ? { position: "absolute", top: -5, left: "50%", marginLeft: -5, width: 10, height: 10, background: C.amber, border: "2px solid #1a1040", borderRight: "none", borderBottom: "none" } : { position: "absolute", top: -4.5, left: "50%", marginLeft: -4.5, width: 9, height: 9, background: "rgba(38,30,18,0.92)", borderLeft: "1px solid rgba(255,159,10,0.45)", borderTop: "1px solid rgba(255,159,10,0.45)", transform: "rotate(45deg)" } } />
-          <div style={ isPixel(settings && settings.style) ? { fontSize: 10.5, fontWeight: 700, color: "#1a1040", fontFamily: "ui-monospace, monospace", textTransform: "uppercase", letterSpacing: 0.5, display: "flex", alignItems: "center", gap: 5 } : { fontSize: 10.5, fontWeight: 700, color: "#FF9F0A", letterSpacing: 0.2, display: "flex", alignItems: "center", gap: 5 } }>
+        <div ref={function (el) { sedPopRef.current = el; }} style={sedS.c}>
+          <div style={sedS.a} />
+          <div style={sedS.t}>
+            {term ? "[!]" : null}
             {ICO.chair}<span>{T("sedentaryMin", { m: idleMin })}</span>
           </div>
-          <div style={ isPixel(settings && settings.style) ? { fontSize: 8.5, color: "#1a1040", fontFamily: "ui-monospace, monospace", marginTop: 2 } : { fontSize: 8.5, color: "rgba(255,159,10,0.65)", marginTop: 2 } }>{T("standHint")}</div>
+          <div style={sedS.h}>{T("standHint")}</div>
           <div style={{ display: "flex", gap: 6, marginTop: 7 }}>
-            <div onMouseDown={function (e) { e.stopPropagation(); if (sedPopRef.current) sedPopRef.current.style.display = "none"; dismissSedPop(); try { invoke("snooze_sedentary", { minutes: 30 }); invoke("hide_sed_popover"); } catch (e) {} }} style={ isPixel(settings && settings.style) ? { flex: 1, textAlign: "center", fontSize: 9, fontWeight: 700, color: "#1a1040", fontFamily: "ui-monospace, monospace", textTransform: "uppercase", border: "2px solid #1a1040", padding: "3px 0", borderRadius: 0, cursor: "pointer" } : { flex: 1, textAlign: "center", fontSize: 9, fontWeight: 600, color: "rgba(255,159,10,0.65)", border: "1px solid rgba(255,159,10,0.35)", padding: "3px 0", borderRadius: 99, cursor: "pointer" } }>{T("later")}</div>
-            <div onMouseDown={function (e) { e.stopPropagation(); if (sedPopRef.current) sedPopRef.current.style.display = "none"; dismissSedPop(); try { onReset(); invoke("hide_sed_popover"); } catch (e) {} }} style={ isPixel(settings && settings.style) ? { flex: 1, textAlign: "center", fontSize: 9, fontWeight: 700, color: "#fff", fontFamily: "ui-monospace, monospace", textTransform: "uppercase", background: "#1a1040", border: "2px solid #1a1040", padding: "3px 0", borderRadius: 0, cursor: "pointer" } : { flex: 1, textAlign: "center", fontSize: 9, fontWeight: 600, color: "#0a0a0c", background: "#FF9F0A", padding: "4px 0", borderRadius: 99, cursor: "pointer" } }>{T("stoodUp")}</div>
+            <div onMouseDown={function (e) { e.stopPropagation(); if (sedPopRef.current) sedPopRef.current.style.display = "none"; dismissSedPop(); try { invoke("snooze_sedentary", { minutes: 30 }); invoke("hide_sed_popover"); } catch (e) {} }} style={sedS.l}>{T("later")}</div>
+            <div onMouseDown={function (e) { e.stopPropagation(); if (sedPopRef.current) sedPopRef.current.style.display = "none"; dismissSedPop(); try { onReset(); invoke("hide_sed_popover"); } catch (e) {} }} style={sedS.o}>{T("stoodUp")}</div>
           </div>
         </div>
       )}
@@ -620,53 +741,67 @@ function Widget({ data, settings, character, onRefresh, onReset, justResetAt, se
           <circle r="2.8" stroke="#0A84FF" strokeWidth="1.7" strokeDasharray="17.59" strokeDashoffset="2.8" />
         </g>
       </svg>
-      <span style={{ fontSize: 11, fontWeight: 700, color: C.label, letterSpacing: 0.1 }}>{T("appTitle")}</span>
+      <span style={{ fontSize: 11, fontWeight: 700, color: C.label, letterSpacing: 0.1, ...(brutal ? { fontFamily: "Georgia, 'Times New Roman', serif" } : {}) }}>
+        {T("appTitle")}
+      </span>
+      {term && <span className="hd-cursor" style={{ display: "inline-block", width: 7, height: 12, background: C.label, verticalAlign: "text-bottom", flexShrink: 0 }} />}
       <div style={{ flex: 1 }} />
       {ballWrap}
       {idleChipWithPop}
       <span style={{ fontSize: 9, fontWeight: 500, color: C.third, fontVariantNumeric: "tabular-nums" }}>{updated || fmtTime(now)}</span>
       {/* 设置入口已移至菜单栏 */}
-      <div data-tauri-drag-region="false" className="hd-refresh-btn" onMouseDown={function (e) { e.preventDefault(); e.stopPropagation(); if (e.button !== 0) return; onRefresh(); }} title={T("refreshTitle")} style={{ width: 19, height: 19, borderRadius: "50%", background: "rgba(255,255,255,0.08)", display: "flex", alignItems: "center", justifyContent: "center", cursor: "pointer", flexShrink: 0, color: C.second }}>
+      <div data-tauri-drag-region="false" className="hd-refresh-btn" onMouseDown={function (e) { e.preventDefault(); e.stopPropagation(); if (e.button !== 0) return; onRefresh(); }} title={T("refreshTitle")} style={{ width: 19, height: 19, borderRadius: brutal ? 0 : term ? 3 : "50%", background: brutal ? C.glassCtl : term ? "transparent" : "rgba(255,255,255,0.08)", border: brutal ? "2px solid " + C.hairline : term ? "1px solid " + C.hairline : "none", display: "flex", alignItems: "center", justifyContent: "center", cursor: "pointer", flexShrink: 0, color: C.second }}>
         {ICO.refresh}
       </div>
     </div>
   );
 
-  const glassStyle = isPixel(settings && settings.style) ? {
-    width: "100%",
-    height: "100%",
-    boxSizing: "border-box",
-    padding: "10px 12px",
-    // 像素动漫风：0 圆角、实底深紫/浅紫青、2px 硬边深角线、硬边像素阴影（4px 4px 0）
-    borderRadius: 0,
-    background: C.bg,
-    border: "2px solid #1a1040",
-    boxShadow: "4px 4px 0 #1a1040",
-    fontFamily: "ui-monospace, 'SF Mono', Menlo, Monaco, Consolas, monospace",
-    display: "flex",
-    flexDirection: "column",
-    overflow: "hidden",
-    position: "relative",
-    imageRendering: "pixelated",
-  } : {
-    width: "100%",
-    height: "100%",
-    boxSizing: "border-box",
-    padding: "12px 14px",
-    // 圆角统一 36px：与系统 NSVisualEffectView 的 setCornerRadius(36) 完全一致，
-    // 四角边界对齐，磨砂层与内容容器不露边（之前超椭圆 clipPath 与系统正圆角不重合）
-    borderRadius: "36px",
-    display: "flex",
-    flexDirection: "column",
-    // 玻璃模糊由系统 NSVisualEffectView 提供；前端只叠极薄 tint 透出系统玻璃。
-    // 不再叠 CSS backdrop-filter：透明 WKWebView 上 backdrop-filter 是 macOS 已知
-    // 白屏/闪烁风险（配合每 5s 重绘 + iframe 动画时尤其明显），去掉后磨砂观感不变。
-    background: C.bg,
-    // 顶部亮棱（受光）+ 底部暗收口，无四向棱线（圆角处交叠出暗角）也无外投影（透明窗口裁直角）
-    boxShadow: "inset 0 1px 0 " + C.rim + ", inset 0 -0.5px 0 rgba(0,0,0,0.16)",
-    overflow: "hidden",
-    position: "relative",
-  };
+  const glassStyle = (function () {
+    if (styleId === "pixel-anime") {
+      return {
+        width: "100%", height: "100%", boxSizing: "border-box", padding: "10px 12px",
+        // 像素动漫风：0 圆角、实底深紫/浅紫青、2px 硬边深角线、硬边像素阴影（4px 4px 0）
+        borderRadius: 0, background: C.bg, border: "2px solid #1a1040",
+        boxShadow: "4px 4px 0 #1a1040",
+        fontFamily: "ui-monospace, 'SF Mono', Menlo, Monaco, Consolas, monospace",
+        display: "flex", flexDirection: "column", overflow: "hidden", position: "relative",
+        imageRendering: "pixelated",
+      };
+    }
+    if (styleId === "brutalist-web") {
+      return {
+        width: "100%", height: "100%", boxSizing: "border-box", padding: "10px 12px",
+        // 粗野主义：0 圆角、实底纯白/纯黑、2px 硬边、硬边投影（无模糊，右下 6px 会被窗口裁掉仅作点缀）
+        borderRadius: 0, background: C.bg, border: "2px solid " + C.hairline,
+        boxShadow: "6px 6px 0 " + C.rim,
+        fontFamily: "'Courier New', Courier, monospace",
+        display: "flex", flexDirection: "column", overflow: "hidden", position: "relative",
+      };
+    }
+    if (styleId === "developer-terminal") {
+      return {
+        width: "100%", height: "100%", boxSizing: "border-box", padding: "10px 12px",
+        // 终端：实底近黑/纸白、1px 细边、小圆角、零阴影（全等宽字体）
+        borderRadius: 4, background: C.bg, border: "1px solid " + C.hairline,
+        fontFamily: "ui-monospace, 'SF Mono', Menlo, Monaco, Consolas, monospace",
+        display: "flex", flexDirection: "column", overflow: "hidden", position: "relative",
+      };
+    }
+    return {
+      width: "100%", height: "100%", boxSizing: "border-box", padding: "12px 14px",
+      // 圆角统一 36px：与系统 NSVisualEffectView 的 setCornerRadius(36) 完全一致，
+      // 四角边界对齐，磨砂层与内容容器不露边（之前超椭圆 clipPath 与系统正圆角不重合）
+      borderRadius: "36px",
+      display: "flex", flexDirection: "column",
+      // 玻璃模糊由系统 NSVisualEffectView 提供；前端只叠极薄 tint 透出系统玻璃。
+      // 不再叠 CSS backdrop-filter：透明 WKWebView 上 backdrop-filter 是 macOS 已知
+      // 白屏/闪烁风险（配合每 5s 重绘 + iframe 动画时尤其明显），去掉后磨砂观感不变。
+      background: C.bg,
+      // 顶部亮棱（受光）+ 底部暗收口，无四向棱线（圆角处交叠出暗角）也无外投影（透明窗口裁直角）
+      boxShadow: "inset 0 1px 0 " + C.rim + ", inset 0 -0.5px 0 rgba(0,0,0,0.16)",
+      overflow: "hidden", position: "relative",
+    };
+  })();
 
   // ── 极简数字风（唯一布局）──
   {
@@ -733,7 +868,7 @@ function Widget({ data, settings, character, onRefresh, onReset, justResetAt, se
           <span style={{ fontSize: 8.5, color: C.third, flexShrink: 0, fontVariantNumeric: "tabular-nums" }}>{t.sleep_deep_min ? T("deepShort") + t.sleep_deep_min + "·REM" + (t.sleep_rem_min || 0) : ""}</span>
         </div>
         {tipText && (
-          isPixel(settings && settings.style) ? (
+          isPixel(styleId) ? (
             // RPG 对话框：2px 黑边 + 四角金色角块装饰（绝对定位伪元素）+ 等宽字体 + 0 圆角
             <div style={{ position: "relative", padding: "5px 8px 5px 12px", background: C.card, border: "2px solid #1a1040", borderRadius: 0, marginTop: 4 }}>
               <div style={{ position: "absolute", left: 4, top: 4, width: 4, height: 4, background: C.rim }} />
@@ -744,7 +879,7 @@ function Widget({ data, settings, character, onRefresh, onReset, justResetAt, se
             </div>
           ) : (
             <div style={{ display: "flex", alignItems: "center", gap: 6, padding: "0 2px", position: "relative" }}>
-              <span style={{ width: 4, height: 4, borderRadius: "50%", background: tipDot, opacity: 0.9, flexShrink: 0, boxShadow: "0 0 6px " + tipDot }} />
+              {term ? <span style={{ color: C.green, fontWeight: 700, fontSize: 9, flexShrink: 0 }}>#</span> : <span style={{ width: 4, height: 4, borderRadius: brutal ? 0 : "50%", background: tipDot, opacity: 0.9, flexShrink: 0, boxShadow: brutal ? "none" : "0 0 6px " + tipDot }} />}
               <span style={{ fontSize: 9.5, color: C.second, fontWeight: 500, lineHeight: 1.3, flex: 1, overflow: "hidden", display: "-webkit-box", WebkitLineClamp: 2, WebkitBoxOrient: "vertical" }}>{tipText}</span>
             </div>
           )
@@ -836,7 +971,7 @@ async function genAiTip(data, settings, rolling_averages) {
    - 若“昨日同期”存在：请对比今日与昨日的差异（增多/减少/持平），并结合“七日平均值”判断当前状态是处于“常规水平”还是“异常波动”。
    - 若“昨日同期”为null：**严禁**进行数值对比！请仅根据“今日”与“七日平均值”的关系，判断今日是“高于平均”还是“低于平均”。
 3. **输出规范**：
-   - 30 字左右的中文，正常使用中文标点：句末用句号「。」，句中可用逗号「，」。
+   - 30 字以内（含标点）的中文，严禁超过 30 字；正常使用中文标点：句末用句号「。」，句中可用逗号「，」。
    - 必须明确趋势（增多/减少/差不多）。
    - 口吻亲切自然，像朋友提醒。
    - 禁止表情符号、专业术语与冗余解释。`;
@@ -880,7 +1015,17 @@ async function genAiTip(data, settings, rolling_averages) {
     }
     // 思考过程(reasoning_content)绝不展示给用户；content 剥离思考后为空则回退静态提示，不拿推理当答案
     if (!c) return null;
-    return c.replace(/\*+/g, "").trim();
+    c = c.replace(/\*+/g, "").trim();
+    // 硬性限制 30 字（含标点）：超出则截断，并尽量在句末标点处收尾，避免把句号截掉
+    const chars = Array.from(c);
+    if (chars.length > 30) {
+      let cut = chars.slice(0, 30);
+      for (let i = cut.length - 1; i >= Math.max(0, cut.length - 3); i--) {
+        if (/[。！？!?…]/.test(cut[i])) { cut = cut.slice(0, i + 1); break; }
+      }
+      c = cut.join("");
+    }
+    return c;
   } catch (e) {
     return null;
   }

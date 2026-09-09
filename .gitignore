@@ -10,3 +10,12 @@ vite.config.js.timestamp-*.mjs
 __pycache__/
 *.pyc
 *.bak-*
+
+# 安装包走 GitHub Releases，不进仓库
+*.dmg
+
+# 原生 WidgetKit 工程构建产物
+native-widget/build/
+native-widget/DerivedData/
+native-widget/*.xcodeproj/xcuserdata/
+native-widget/HealthWidget/appicon.png
