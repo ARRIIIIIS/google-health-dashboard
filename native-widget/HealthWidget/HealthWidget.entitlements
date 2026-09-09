@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <!-- 关闭沙盒以便直接读取 ~/Library/Application Support/.../data.json 绝对路径 -->
+    <key>com.apple.security.app-sandbox</key>
+    <false/>
+</dict>
+</plist>
