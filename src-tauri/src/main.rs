@@ -65,6 +65,12 @@ struct Settings {
     gaze_threshold: f64,
     #[serde(default = "default_gaze_radius")]
     gaze_radius: f64,
+    /// 自定义 app 名称（空 = 用 i18n 默认标题）
+    #[serde(default)]
+    app_name: String,
+    /// 自定义图标："" = 默认；"preset:<id>" = 内置预设；"base64:<data>" = 用户上传（PNG）
+    #[serde(default)]
+    custom_icon: String,
 }
 
 impl Default for Settings {
@@ -92,6 +98,8 @@ impl Default for Settings {
             // gaze 跟随更灵敏：阈值 1.0（满偏）+ 满偏距离 80px（更小=鼠标更近就到满偏）
             gaze_threshold: 1.0,
             gaze_radius: 80.0,
+            app_name: String::new(),
+            custom_icon: String::new(),
         }
     }
 }
@@ -125,6 +133,215 @@ fn save_settings_file(app: &AppHandle, s: &Settings) -> std::io::Result<()> {
     std::fs::create_dir_all(&dir)?;
     std::fs::write(dir.join(SETTINGS_FILE), serde_json::to_string_pretty(s)?)
 }
+
+/// 用户上传的自定义图标文件路径（app_data_dir/custom_icon.png）
+fn custom_icon_file(app: &AppHandle) -> PathBuf {
+    let dir = app.path().app_data_dir().expect("app_data_dir");
+    dir.join("custom_icon.png")
+}
+
+/// 内置预设图标（base64 PNG，256x256）。避免额外资源文件，纯代码内置几个风格色块。
+/// 预设 id → base64 PNG。
+fn preset_icon_bytes(id: &str) -> Option<Vec<u8>> {
+    // 用 image crate 现画一个 256x256 的圆角色块图标（比手工 base64 更省事、可扩展）
+    let (r, g, b) = match id {
+        "teal"    => (48, 209, 88),   // 绿
+        "blue"    => (10, 132, 255),  // 蓝
+        "orange"  => (255, 159, 10),  // 橙
+        "purple"  => (175, 82, 222),  // 紫
+        "red"     => (255, 69, 58),   // 红
+        _ => return None,
+    };
+    // 256x256 纯色 + 内圆环（模拟健康环）
+    use image::{ImageBuffer, Rgba, RgbaImage};
+    let mut img: RgbaImage = ImageBuffer::from_pixel(256, 256, Rgba([r, g, b, 255]));
+    // 画白色内圆（环心）
+    let cx = 128.0_f32; let cy = 128.0_f32;
+    for y in 0..256 {
+        for x in 0..256 {
+            let d = ((x as f32 - cx).powi(2) + (y as f32 - cy).powi(2)).sqrt();
+            if d > 52.0 && d < 78.0 {
+                img.put_pixel(x, y, Rgba([255, 255, 255, 255]));
+            }
+        }
+    }
+    let mut buf = std::io::Cursor::new(Vec::new());
+    if image::DynamicImage::ImageRgba8(img)
+        .write_to(&mut buf, image::ImageFormat::Png)
+        .is_ok()
+    {
+        Some(buf.into_inner())
+    } else {
+        None
+    }
+}
+
+/// 把设置里的 custom_icon 解析成 tauri Image（供 tray 使用）。
+/// 返回 None = 用默认图标。
+fn resolve_icon_image(app: &AppHandle, s: &Settings) -> Option<tauri::image::Image<'static>> {
+    use tauri::image::Image;
+    let c = s.custom_icon.as_str();
+    if c.is_empty() {
+        return None; // 默认图标由调用方从 resources/icons 加载
+    }
+    if let Some(rest) = c.strip_prefix("preset:") {
+        if let Some(bytes) = preset_icon_bytes(rest) {
+            return Image::from_bytes(&bytes).ok();
+        }
+        return None;
+    }
+    if let Some(rest) = c.strip_prefix("base64:") {
+        // 用户上传：先落盘（供前端 <img> 显示 & 重启后复用），再加载
+        if let Ok(bytes) = base64_decode(rest) {
+            if let Ok(dir) = app.path().app_data_dir() {
+                std::fs::create_dir_all(&dir).ok();
+                let _ = std::fs::write(dir.join("custom_icon.png"), &bytes);
+            }
+            return Image::from_bytes(&bytes).ok();
+        }
+        return None;
+    }
+    None
+}
+
+/// 简易 base64 解码（std 无内置，手写最小实现）
+fn base64_decode(s: &str) -> Result<Vec<u8>, ()> {
+    let mut table = [-1i8; 256];
+    for (i, &ch) in b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/".iter().enumerate() {
+        table[ch as usize] = i as i8;
+    }
+    let clean: Vec<u8> = s.bytes().filter(|b| *b != b'\n' && *b != b'\r' && *b != b' ').collect();
+    let mut out = Vec::with_capacity(clean.len() / 4 * 3);
+    let mut i = 0;
+    while i + 4 <= clean.len() {
+        let a = table[clean[i] as usize];
+        let b2 = table[clean[i + 1] as usize];
+        let c = table[clean[i + 2] as usize];
+        let d = table[clean[i + 3] as usize];
+        if a < 0 || b2 < 0 { return Err(()); }
+        let x = ((a as u32) << 18) | ((b2 as u32) << 12);
+        out.push((x >> 16) as u8);
+        if clean[i + 2] != b'=' && c >= 0 {
+            out.push(((x >> 8) & 0xff) as u8);
+            if clean[i + 3] != b'=' && d >= 0 {
+                out.push((x & 0xff) as u8);
+            }
+        }
+        i += 4;
+    }
+    Ok(out)
+}
+
+/// 把当前设置的自定义图标应用到菜单栏 tray（热更新）。无自定义则回退默认图标。
+/// 把当前设置的自定义图标应用到系统托盘/菜单栏（热更新）。无自定义则回退默认图标。
+fn apply_tray_icon(app: &AppHandle, s: &Settings) {
+    let image = resolve_icon_image(app, s);
+    let icon = image.unwrap_or_else(|| {
+        let icon_path = app.path().resource_dir().unwrap_or_default().join("icons/128x128.png");
+        tauri::image::Image::from_path(&icon_path).unwrap_or_else(|_| {
+            // 兜底：极小 1x1 透明占位，避免 set_icon 失败
+            tauri::image::Image::new_owned(vec![0u8; 4], 1, 1)
+        })
+    });
+    if let Some(tray) = app.tray_by_id("main") {
+        let _ = tray.set_icon(Some(icon));
+    }
+    let _ = app.tray_by_id("main").map(|t| t.set_tooltip(Some(app_title(s))));
+}
+
+/// 当前生效的 app 名称（自定义为空则用默认 "Health Dashboard"）
+fn app_title(s: &Settings) -> String {
+    if !s.app_name.trim().is_empty() {
+        s.app_name.trim().to_string()
+    } else {
+        "Health Dashboard".to_string()
+    }
+}
+
+/// 命令：设置自定义名称 + 图标。icon 为 "preset:<id>" / "base64:..." / ""（仅名称）。
+/// 立即热更新菜单栏图标，并持久化。
+#[tauri::command]
+fn set_app_identity(app: AppHandle, state: tauri::State<SettingsHandle>, name: String, icon: String) -> Result<(), String> {
+    {
+        let mut s = state.0.lock().unwrap();
+        s.app_name = name;
+        s.custom_icon = icon;
+    }
+    let s = state.clone_inner();
+    save_settings_file(&app, &s).map_err(|e| e.to_string())?;
+    apply_tray_icon(&app, &s);
+    Ok(())
+}
+
+/// 命令：重置为默认名称 + 默认图标（清除自定义文件）。
+#[tauri::command]
+fn reset_app_identity(app: AppHandle, state: tauri::State<SettingsHandle>) -> Result<(), String> {
+    {
+        let mut s = state.0.lock().unwrap();
+        s.app_name = String::new();
+        s.custom_icon = String::new();
+    }
+    let s = state.clone_inner();
+    save_settings_file(&app, &s).map_err(|e| e.to_string())?;
+    // 删除自定义图标文件
+    let f = custom_icon_file(&app);
+    let _ = std::fs::remove_file(&f);
+    apply_tray_icon(&app, &s);
+    Ok(())
+}
+
+/// 命令：返回当前自定义名称 + 自定义图标的 dataURL（前端显示预览用）。
+#[tauri::command]
+fn get_app_identity(app: AppHandle) -> String {
+    let s = load_settings(&app);
+    let mut out = serde_json::json!({
+        "name": s.app_name,
+        "icon": "",
+    });
+    // 若为 base64 上传，直接回原 dataURL；若 preset，回 base64 PNG 预览
+    if let Some(rest) = s.custom_icon.strip_prefix("base64:") {
+        out["icon"] = serde_json::json!(format!("data:image/png;base64,{}", rest));
+    } else if let Some(rest) = s.custom_icon.strip_prefix("preset:") {
+        if let Some(bytes) = preset_icon_bytes(rest) {
+            out["icon"] = serde_json::json!(format!("data:image/png;base64,{}", base64_encode(&bytes)));
+        }
+    } else if let Ok(bytes) = std::fs::read(custom_icon_file(&app)) {
+        // 兼容：custom_icon 为空但文件存在（老版本残留），回文件
+        out["icon"] = serde_json::json!(format!("data:image/png;base64,{}", base64_encode(&bytes)));
+    }
+    out.to_string()
+}
+
+/// 简易 base64 编码（配合前端预览）
+fn base64_encode(bytes: &[u8]) -> String {
+    const T: &[u8] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+    let mut out = String::new();
+    let mut i = 0;
+    while i + 3 <= bytes.len() {
+        let n = ((bytes[i] as u32) << 16) | ((bytes[i + 1] as u32) << 8) | (bytes[i + 2] as u32);
+        out.push(T[(n >> 18) as usize & 63] as char);
+        out.push(T[(n >> 12) as usize & 63] as char);
+        out.push(T[(n >> 6) as usize & 63] as char);
+        out.push(T[n as usize & 63] as char);
+        i += 3;
+    }
+    let rem = bytes.len() - i;
+    if rem == 1 {
+        let n = (bytes[i] as u32) << 16;
+        out.push(T[(n >> 18) as usize & 63] as char);
+        out.push(T[(n >> 12) as usize & 63] as char);
+        out.push('=');
+        out.push('=');
+    } else if rem == 2 {
+        let n = ((bytes[i] as u32) << 16) | ((bytes[i + 1] as u32) << 8);
+        out.push(T[(n >> 18) as usize & 63] as char);
+        out.push(T[(n >> 12) as usize & 63] as char);
+        out.push(T[(n >> 6) as usize & 63] as char);
+        out.push('=');
+    }
+    out
+}
+
 
 // 共享刷新间隔（save_settings 可热更新，无需重启采集线程）
 struct RefreshState(Arc<Mutex<u64>>);
@@ -2046,25 +2263,24 @@ fn main() {
                 use tauri::tray::{TrayIconBuilder, MouseButton, MouseButtonState};
                 use tauri::image::Image;
 
-                // 从 icons/ 目录加载菜单栏图标
+                // 从 icons/ 目录加载菜单栏图标（支持自定义图标：预设/上传优先，否则默认）
                 let resource_dir = app.path().resource_dir().unwrap_or_default();
                 eprintln!("[health] resource_dir: {:?}", resource_dir);
-                let icon_path = resource_dir.join("icons/128x128.png");
-                eprintln!("[health] icon_path: {:?}", icon_path);
 
-                let icon = match Image::from_path(&icon_path) {
-                    Ok(i) => i,
-                    Err(e) => {
+                let icon = resolve_icon_image(app.handle(), &settings).unwrap_or_else(|| {
+                    let icon_path = resource_dir.join("icons/128x128.png");
+                    eprintln!("[health] icon_path: {:?}", icon_path);
+                    Image::from_path(&icon_path).unwrap_or_else(|e| {
                         eprintln!("[health] icon load failed: {:?}", e);
-                        return Ok(());
-                    }
-                };
+                        Image::new_owned(vec![0u8; 4], 1, 1)
+                    })
+                });
 
                 let app_handle = app.handle().clone();
                 let tray_app = app.handle().clone(); // separate clone for closure
                 let _tray = TrayIconBuilder::with_id("main")
                     .icon(icon)
-                    .tooltip("Health Dashboard")
+                    .tooltip(app_title(&settings))
                     .on_tray_icon_event(move |_tray, event| {
                         if let tauri::tray::TrayIconEvent::Click {
                             button: MouseButton::Left,
@@ -2247,6 +2463,9 @@ fn main() {
             toggle_autostart_setting,
             open_external,
             report_fe_error,
+            set_app_identity,
+            reset_app_identity,
+            get_app_identity,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

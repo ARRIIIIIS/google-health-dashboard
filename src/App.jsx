@@ -375,6 +375,19 @@ function cleanTip(s) {
 // ── Settings panel（覆盖在小组件之上的滚动设置层）────────────────────────────
 function SettingsPanel({ draft, setDraft, onSave, onCancel, busy, rerender, systemDark, onTestApi, testStatus, onTestDataApi, testDataStatus }) {
   const set = (k, v) => setDraft((d) => ({ ...d, [k]: v }));
+
+  // 把 custom_icon 设置渲染成左上角预览（预设→色块，上传→img）
+  const iconPreview = (ci) => {
+    if (!ci) return null;
+    if (ci.startsWith("base64:")) {
+      return <img src={"data:image/png;base64," + ci.slice(7)} width="22" height="22" style={{ objectFit: "cover", borderRadius: 4 }} alt="" />;
+    }
+    const map = { "preset:teal":[48,209,88], "preset:blue":[10,132,255], "preset:orange":[255,159,10], "preset:purple":[175,82,222], "preset:red":[255,69,58] };
+    const c = map[ci];
+    if (c) return <div style={{ width: 22, height: 22, borderRadius: "50%", background: `rgb(${c[0]},${c[1]},${c[2]})`, boxShadow: "inset 0 0 0 2px rgba(255,255,255,0.7)" }} />;
+    return null;
+  };
+
   const guideCard = { background: "rgba(128,128,128,0.08)", border: "1px solid " + C.hairline, borderRadius: 12, padding: "9px 11px", marginTop: 6 };
   const guideBtn = { display: "inline-block", marginTop: 7, fontSize: 10, fontWeight: 600, color: "#fff", background: C.blue, padding: "5px 11px", borderRadius: 8, cursor: "pointer" };
   const sedCard = {
@@ -487,6 +500,68 @@ function SettingsPanel({ draft, setDraft, onSave, onCancel, busy, rerender, syst
         ))}
       </div>
 
+      {/* ── App 名称与图标（自定义）── */}
+      <div style={{ marginTop: 10, padding: "10px 12px", borderRadius: 14, border: "1px solid " + C.hairline, background: "rgba(128,128,128,0.06)" }}>
+        <div style={{ fontSize: 11, fontWeight: 700, color: C.label, marginBottom: 7 }}>{"App 名称与图标"}</div>
+        <label style={labelStyle}>{"App 名称"}</label>
+        <input
+          type="text"
+          value={draft.app_name || ""}
+          onChange={(e) => set("app_name", e.target.value)}
+          placeholder={T("appTitle")}
+          style={inputStyle}
+        />
+        <label style={labelStyle}>{"图标"}</label>
+        <div style={{ display: "flex", gap: 6, flexWrap: "wrap", alignItems: "center" }}>
+          {/* 当前图标预览 */}
+          <div style={{ width: 26, height: 26, borderRadius: 6, border: "1px solid " + C.hairline, overflow: "hidden", display: "flex", alignItems: "center", justifyContent: "center", background: "rgba(128,128,128,0.12)", flexShrink: 0 }}>
+            {iconPreview(draft.custom_icon)}
+          </div>
+          {/* 预设图标 */}
+          {[["preset:teal","48,209,88"],["preset:blue","10,132,255"],["preset:orange","255,159,10"],["preset:purple","175,82,222"],["preset:red","255,69,58"]].map(([pid, rgb]) => {
+            const c = rgb.split(",").map(Number);
+            const active = draft.custom_icon === pid;
+            return (
+              <div key={pid} onClick={() => set("custom_icon", pid)}
+                style={{ width: 26, height: 26, borderRadius: 6, cursor: "pointer", border: active ? "2px solid " + C.blue : "1px solid " + C.hairline, boxSizing: "border-box",
+                  background: `rgb(${c[0]},${c[1]},${c[2]})`, position: "relative", flexShrink: 0 }}>
+                <div style={{ position: "absolute", inset: 7, borderRadius: "50%", border: "2px solid rgba(255,255,255,0.85)" }} />
+              </div>
+            );
+          })}
+          {/* 上传 */}
+          <label style={{ width: 26, height: 26, borderRadius: 6, border: "1px dashed " + C.hairline, display: "flex", alignItems: "center", justifyContent: "center", cursor: "pointer", color: C.second, fontSize: 16, flexShrink: 0, background: "rgba(128,128,128,0.1)" }}>
+            +
+            <input
+              type="file"
+              accept="image/png,image/jpeg"
+              style={{ display: "none" }}
+              onChange={(e) => {
+                const f = e.target.files && e.target.files[0];
+                if (!f) return;
+                const rd = new FileReader();
+                rd.onload = () => {
+                  const dataUrl = rd.result;
+                  // 去掉前缀，只留 base64
+                  const b64 = String(dataUrl).split(",")[1] || "";
+                  set("custom_icon", "base64:" + b64);
+                };
+                rd.readAsDataURL(f);
+                e.target.value = "";
+              }}
+            />
+          </label>
+          {/* 重置 */}
+          <div onClick={() => { set("app_name", ""); set("custom_icon", ""); }}
+            style={{ fontSize: 9.5, fontWeight: 600, color: C.alert, border: "1px solid " + C.alert, borderRadius: 7, padding: "3px 9px", cursor: "pointer", marginLeft: "auto" }}>
+            {"重置"}
+          </div>
+        </div>
+        <div style={{ fontSize: 8.5, color: C.third, marginTop: 6, lineHeight: 1.35 }}>
+          {"图标应用到小组件左上角 + 菜单栏，保存后立即生效。"}
+        </div>
+      </div>
+
       {/* ── 刷新间隔（预设）── */}
       <label style={labelStyle}>{T("refreshInterval")}</label>
       <div style={{ display: "flex", gap: 5, flexWrap: "wrap" }}>
@@ -557,7 +632,7 @@ function SettingsPanel({ draft, setDraft, onSave, onCancel, busy, rerender, syst
   </div >
 );
 }
-function Widget({ data, settings, character, onRefresh, onReset, justResetAt, sedPopRef, dndActive, bottomTip, forceWidgetPop, setForceWidgetPop }) {
+function Widget({ data, settings, appIdentity, character, onRefresh, onReset, justResetAt, sedPopRef, dndActive, bottomTip, forceWidgetPop, setForceWidgetPop }) {
   const styleId = settings && settings.style;
   const brutal = isBrutal(styleId);
   const term = isTerm(styleId);
@@ -734,15 +809,19 @@ function Widget({ data, settings, character, onRefresh, onReset, justResetAt, se
       }}
       style={{ display: "flex", alignItems: "center", gap: 9, padding: "0 2px", cursor: "grab" }}
     >
-      <svg width="18" height="18" viewBox="0 0 18 18" style={{ display: "block", flexShrink: 0 }}>
-        <g transform="translate(9,9) rotate(-90)" fill="none" strokeLinecap="round">
-          <circle r="7.3" stroke="#FF375F" strokeWidth="1.7" strokeDasharray="45.87" strokeDashoffset="5.5" />
-          <circle r="5.0" stroke="#30D158" strokeWidth="1.7" strokeDasharray="31.42" strokeDashoffset="4.2" />
-          <circle r="2.8" stroke="#0A84FF" strokeWidth="1.7" strokeDasharray="17.59" strokeDashoffset="2.8" />
-        </g>
-      </svg>
+      {appIdentity && appIdentity.icon ? (
+        <img src={appIdentity.icon} width="18" height="18" style={{ display: "block", flexShrink: 0, borderRadius: brutal ? 0 : term ? 3 : 4, objectFit: "cover" }} alt="" />
+      ) : (
+        <svg width="18" height="18" viewBox="0 0 18 18" style={{ display: "block", flexShrink: 0 }}>
+          <g transform="translate(9,9) rotate(-90)" fill="none" strokeLinecap="round">
+            <circle r="7.3" stroke="#FF375F" strokeWidth="1.7" strokeDasharray="45.87" strokeDashoffset="5.5" />
+            <circle r="5.0" stroke="#30D158" strokeWidth="1.7" strokeDasharray="31.42" strokeDashoffset="4.2" />
+            <circle r="2.8" stroke="#0A84FF" strokeWidth="1.7" strokeDasharray="17.59" strokeDashoffset="2.8" />
+          </g>
+        </svg>
+      )}
       <span style={{ fontSize: 11, fontWeight: 700, color: C.label, letterSpacing: 0.1, ...(brutal ? { fontFamily: "Georgia, 'Times New Roman', serif" } : {}) }}>
-        {T("appTitle")}
+        {(appIdentity && appIdentity.name) || (settings && settings.app_name) || T("appTitle")}
       </span>
       {term && <span className="hd-cursor" style={{ display: "inline-block", width: 7, height: 12, background: C.label, verticalAlign: "text-bottom", flexShrink: 0 }} />}
       <div style={{ flex: 1 }} />
@@ -1037,6 +1116,9 @@ export default function App() {
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [draft, setDraft] = useState(null);
 
+  // 自定义 App 标识：{ name, icon(dataURL) }，用于小组件左上角图标/标题
+  const [appIdentity, setAppIdentity] = useState(null);
+
   const [dndActive, setDndActive] = useState(false);
 
   // 桌面伙伴角色：actualChar 为当前实际渲染的角色；characterPref 来自菜单设置
@@ -1139,6 +1221,11 @@ export default function App() {
       const s = JSON.parse(await invoke("get_settings"));
       settingsRef.current = s;
       setSettings(s);
+      // 读取自定义名称 + 图标预览（dataURL）
+      try {
+        const id = JSON.parse(await invoke("get_app_identity"));
+        setAppIdentity({ name: id.name || "", icon: id.icon || "" });
+      } catch (e) {}
       setCharacterPref(s.character || "qiuqiu");
       const lang = s.language || "zh-CN";
       setLang(lang);
@@ -1275,9 +1362,20 @@ export default function App() {
     C = pickPalette(settingsRef.current.style, dark);
     rerender();
     try {
+      const prev = settingsRef.current || {};
+      const identityChanged = (s.app_name || "") !== (prev.app_name || "") ||
+                              (s.custom_icon || "") !== (prev.custom_icon || "");
       await invoke("save_settings", { json: JSON.stringify(s) });
       settingsRef.current = s;
       setSettings(s);
+      // 自定义名称/图标有改动 → 热更新菜单栏图标 + 刷新左上角
+      if (identityChanged) {
+        try {
+          await invoke("set_app_identity", { name: s.app_name || "", icon: s.custom_icon || "" });
+          const id = JSON.parse(await invoke("get_app_identity"));
+          setAppIdentity({ name: id.name || "", icon: id.icon || "" });
+        } catch (e) {}
+      }
       // 位置固定为默认（与 macOS 小组件对齐），不再运行时拖拽/多屏定位
       setSettingsOpen(false);
     } catch (e) { console.warn("save failed", e); }
@@ -1389,6 +1487,7 @@ export default function App() {
         <Widget
           data={data}
           settings={settings || {}}
+          appIdentity={appIdentity}
           character={activeChar}
           onRefresh={onRefresh}
           onReset={onReset}

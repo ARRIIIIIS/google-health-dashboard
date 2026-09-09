@@ -19,6 +19,8 @@ serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 chrono = "0.4"
 libc = "0.2"
+# 用户上传 PNG 图标的解码（自定义 App 图标）
+image = { version = "0.24", default-features = false, features = ["png"] }
 # 久坐提醒弹窗：以本 app（菜单栏 Health Dashboard）身份发 macOS 系统通知
 tauri-plugin-notification = "2"
 
