@@ -46,7 +46,10 @@ struct Settings {
     pos_y: i32,
     /// 用户是否手动摆放过小组件。false = 从未摆放（启动时居中），true = 恢复上次位置
     pos_saved: bool,
-    respect_dnd: bool, // 勿扰时是否抑制久坐提醒
+    /// 桌面伙伴角色：qiuqiu(球球) / nimbo(云宝) / twinkle(亮亮) / claw(钳钳) / random(每 3 分钟轮换)
+    /// 系统勿扰（Focus）始终跟随，不再提供「勿扰式静音」用户开关。
+    #[serde(default = "default_character")]
+    character: String,
     widget_visible: bool, // 小组件主窗口是否显示
     sedentary_min: u64, // 连续不动超过此时长(分钟)判定久坐
     sedentary_remind_min: u64, // 久坐后每隔多久复查提醒一次(分钟)
@@ -73,7 +76,7 @@ impl Default for Settings {
             pos_x: 20,
             pos_y: 60,
             pos_saved: false,
-            respect_dnd: true,
+            character: "qiuqiu".into(),
             widget_visible: true,
             sedentary_min: 45,
             sedentary_remind_min: 30,
@@ -91,6 +94,7 @@ impl Default for Settings {
 
 fn default_gaze_threshold() -> f64 { 1.0 }
 fn default_gaze_radius() -> f64 { 80.0 }
+fn default_character() -> String { "qiuqiu".into() }
 
 const SETTINGS_FILE: &str = "settings.json";
 
@@ -144,7 +148,12 @@ struct MenuStrings {
     lang_en: String,
     lang_ja: String,
     autostart: String,
-    respect_dnd: String,
+    character_sub: String,
+    char_qiuqiu: String,
+    char_nimbo: String,
+    char_twinkle: String,
+    char_claw: String,
+    char_random: String,
     refresh_sub: String,
     refresh_5: String,
     refresh_15: String,
@@ -176,7 +185,11 @@ struct MenuItems {
     sed_90: tauri::menu::CheckMenuItem<tauri::Wry>,
     visible: tauri::menu::CheckMenuItem<tauri::Wry>,
     autostart: tauri::menu::CheckMenuItem<tauri::Wry>,
-    respect_dnd: tauri::menu::CheckMenuItem<tauri::Wry>,
+    char_qiuqiu: tauri::menu::CheckMenuItem<tauri::Wry>,
+    char_nimbo: tauri::menu::CheckMenuItem<tauri::Wry>,
+    char_twinkle: tauri::menu::CheckMenuItem<tauri::Wry>,
+    char_claw: tauri::menu::CheckMenuItem<tauri::Wry>,
+    char_random: tauri::menu::CheckMenuItem<tauri::Wry>,
 }
 
 struct MenuItemsState(pub std::sync::Mutex<Option<MenuItems>>);
@@ -207,6 +220,13 @@ fn menu_radio(group: &str, on: &str, it: &MenuItems) {
             set(&it.sed_60, on == "sed_60");
             set(&it.sed_90, on == "sed_90");
         }
+        "char" => {
+            set(&it.char_qiuqiu, on == "char_qiuqiu");
+            set(&it.char_nimbo, on == "char_nimbo");
+            set(&it.char_twinkle, on == "char_twinkle");
+            set(&it.char_claw, on == "char_claw");
+            set(&it.char_random, on == "char_random");
+        }
         _ => {}
     }
 }
@@ -226,8 +246,13 @@ fn menu_strings(lang: &str) -> MenuStrings {
             lang_en: "English".into(),
             lang_ja: "Japanese".into(),
             autostart: "Launch at Login".into(),
-            respect_dnd: "Silent during Focus".into(),
-            refresh_sub: "Data Refresh".into(),
+            character_sub: "Companion".into(),
+            char_qiuqiu: "Qiuqiu".into(),
+            char_nimbo: "Nimbo".into(),
+            char_twinkle: "Twinkle".into(),
+            char_claw: "Claw".into(),
+            char_random: "Shuffle · every 3 min".into(),
+            refresh_sub: "Update Interval".into(),
             refresh_5: "5 min".into(),
             refresh_15: "15 min".into(),
             refresh_30: "30 min".into(),
@@ -250,8 +275,13 @@ fn menu_strings(lang: &str) -> MenuStrings {
             lang_en: "English".into(),
             lang_ja: "日本語".into(),
             autostart: "ログイン時に起動".into(),
-            respect_dnd: "集中モード中は静かに".into(),
-            refresh_sub: "データ更新".into(),
+            character_sub: "キャラクター".into(),
+            char_qiuqiu: "球球".into(),
+            char_nimbo: "雲宝".into(),
+            char_twinkle: "亮亮".into(),
+            char_claw: "鉗鉗".into(),
+            char_random: "ランダム · 3分ごと".into(),
+            refresh_sub: "更新間隔".into(),
             refresh_5: "5 分".into(),
             refresh_15: "15 分".into(),
             refresh_30: "30 分".into(),
@@ -265,7 +295,7 @@ fn menu_strings(lang: &str) -> MenuStrings {
         },
         _ => MenuStrings {
             show_widget: "显示小组件".into(),
-            theme_sub: "外观设置".into(),
+            theme_sub: "外观".into(),
             theme_auto: "跟随系统".into(),
             theme_light: "浅色模式".into(),
             theme_dark: "深色模式".into(),
@@ -273,9 +303,14 @@ fn menu_strings(lang: &str) -> MenuStrings {
             lang_zh: "简体中文".into(),
             lang_en: "English".into(),
             lang_ja: "日本語".into(),
-            autostart: "开机自启动".into(),
-            respect_dnd: "免打扰时静默".into(),
-            refresh_sub: "数据更新".into(),
+            autostart: "登录时启动".into(),
+            character_sub: "桌搭伙伴".into(),
+            char_qiuqiu: "球球".into(),
+            char_nimbo: "云宝".into(),
+            char_twinkle: "亮亮".into(),
+            char_claw: "钳钳".into(),
+            char_random: "随机 · 每 3 分钟换".into(),
+            refresh_sub: "更新频率".into(),
             refresh_5: "5 分钟".into(),
             refresh_15: "15 分钟".into(),
             refresh_30: "30 分钟".into(),
@@ -285,7 +320,7 @@ fn menu_strings(lang: &str) -> MenuStrings {
             open_folder: "打开数据目录".into(),
             setup_wizard: "设置…".into(),
             restart: "重新启动".into(),
-            quit: "退出程序".into(),
+            quit: "退出".into(),
         },
     }
 }
@@ -317,6 +352,17 @@ fn relaunch(app: &AppHandle) {
 fn build_main_menu(app: &AppHandle, s: &Settings) -> tauri::menu::Menu<tauri::Wry> {
     use tauri::menu::{CheckMenuItem, IsMenuItem, Menu, MenuItem, PredefinedMenuItem, Submenu};
     let m = menu_strings(&s.language);
+
+    // ── 桌搭伙伴子菜单 ──
+    let char_qiuqiu  = CheckMenuItem::with_id(app, "char_qiuqiu",  &m.char_qiuqiu,  true, s.character == "qiuqiu",  None::<&str>).unwrap();
+    let char_nimbo   = CheckMenuItem::with_id(app, "char_nimbo",   &m.char_nimbo,   true, s.character == "nimbo",   None::<&str>).unwrap();
+    let char_twinkle = CheckMenuItem::with_id(app, "char_twinkle", &m.char_twinkle, true, s.character == "twinkle", None::<&str>).unwrap();
+    let char_claw    = CheckMenuItem::with_id(app, "char_claw",    &m.char_claw,    true, s.character == "claw",    None::<&str>).unwrap();
+    let char_random  = CheckMenuItem::with_id(app, "char_random",  &m.char_random,  true, s.character == "random",  None::<&str>).unwrap();
+    let char_sub = Submenu::with_id_and_items(
+        app, "char_menu", &m.character_sub, true,
+        &[&char_qiuqiu, &char_nimbo, &char_twinkle, &char_claw, &char_random]
+    ).unwrap();
 
     // ── 主题子菜单 ──
     let theme_auto  = CheckMenuItem::with_id(app, "theme_auto",  &m.theme_auto,  true, s.theme == "auto",  None::<&str>).unwrap();
@@ -359,33 +405,32 @@ fn build_main_menu(app: &AppHandle, s: &Settings) -> tauri::menu::Menu<tauri::Wr
     // ── 基础项 ──
     let toggle_visible = CheckMenuItem::with_id(app, "toggle_visible", &m.show_widget, true, s.widget_visible, None::<&str>).unwrap();
     let autostart  = CheckMenuItem::with_id(app, "toggle_autostart", &m.autostart,  true, s.autostart,    None::<&str>).unwrap();
-    let respect_dnd = CheckMenuItem::with_id(app, "toggle_dnd",       &m.respect_dnd,  true, s.respect_dnd, None::<&str>).unwrap();
     let refresh_now = MenuItem::with_id(app, "refresh_now",  &m.refresh_now,  true, Some("R")).unwrap();
     let open_folder = MenuItem::with_id(app, "open_data_folder", &m.open_folder,  true, None::<&str>).unwrap();
+    let setup_wizard_item = MenuItem::with_id(app, "open_setup", &m.setup_wizard, true, None::<&str>).unwrap();
+    let restart_item      = MenuItem::with_id(app, "restart", &m.restart, true, None::<&str>).unwrap();
     let quit        = MenuItem::with_id(app, "quit",        &m.quit,             true, Some("Q")).unwrap();
     let sep = PredefinedMenuItem::separator(app).unwrap();
 
+    // 分组顺序：窗口 → 操作 → 个性化 → 提醒与数据 → 配置 → 维护 → 退出（隔离沉底）
     let mut items: Vec<&dyn IsMenuItem<tauri::Wry>> = Vec::new();
-    items.push(&toggle_visible);
+    items.push(&toggle_visible);      // 窗口：高频开关
+    items.push(&refresh_now);         // 操作：立即刷新
     items.push(&sep);
-    items.push(&refresh_sub);
-    items.push(&sed_sub);
-    items.push(&sep);
-    items.push(&autostart);
-    items.push(&respect_dnd);
-    items.push(&sep);
+    items.push(&char_sub);            // 个性化：桌搭伙伴 / 外观 / 语言
     items.push(&theme_sub);
     items.push(&lang_sub);
     items.push(&sep);
-    items.push(&refresh_now);
-    let setup_wizard_item = MenuItem::with_id(app, "open_setup", &m.setup_wizard, true, None::<&str>).unwrap();
-    let restart_item      = MenuItem::with_id(app, "restart", &m.restart, true, None::<&str>).unwrap();
+    items.push(&sed_sub);             // 提醒与数据
+    items.push(&refresh_sub);
+    items.push(&sep);
+    items.push(&setup_wizard_item);   // 配置
     items.push(&open_folder);
     items.push(&sep);
-    items.push(&setup_wizard_item);
-    items.push(&sep);
+    items.push(&autostart);           // 维护
     items.push(&restart_item);
-    items.push(&quit);
+    items.push(&sep);
+    items.push(&quit);                // 退出：单独隔离，避免误点
     let menu = Menu::with_items(app, &items).unwrap();
 
     // 保存句柄供 on_menu_event 用 set_checked 做确定性单选
@@ -397,7 +442,7 @@ fn build_main_menu(app: &AppHandle, s: &Settings) -> tauri::menu::Menu<tauri::Wr
             sed_30, sed_40, sed_45, sed_60, sed_90,
             visible: toggle_visible,
             autostart,
-            respect_dnd,
+            char_qiuqiu, char_nimbo, char_twinkle, char_claw, char_random,
         });
     }
 
@@ -1459,18 +1504,6 @@ fn toggle_autostart_setting(app: AppHandle, enabled: bool) -> Result<(), String>
     Ok(())
 }
 
-/// 切换勿扰静默（立即写文件）
-#[tauri::command]
-fn toggle_dnd_setting(app: AppHandle, enabled: bool) -> Result<(), String> {
-    let sh = app.state::<SettingsHandle>();
-    sh.set("respect_dnd", enabled);
-    let s = sh.clone_inner();
-    save_settings_file(&app, &s).map_err(|e| e.to_string())?;
-    eprintln!("[health] respect_dnd set to {}", enabled);
-    rebuild_tray_menu(&app);
-    Ok(())
-}
-
 /// 在默认浏览器中打开外部设置引导页（Google 授权 / AI 配置等）
 #[tauri::command]
 fn open_external(url: String) -> Result<(), String> {
@@ -2000,17 +2033,19 @@ fn main() {
                             "sed_45"  => { radio("sed", "sed_45");  sh.set("sedentary_min", 45u64); s_changed = true; }
                             "sed_60"  => { radio("sed", "sed_60");  sh.set("sedentary_min", 60u64); s_changed = true; }
                             "sed_90"  => { radio("sed", "sed_90");  sh.set("sedentary_min", 90u64); s_changed = true; }
+                            // ── 桌搭伙伴 ──
+                            "char_qiuqiu"  => { radio("char", "char_qiuqiu");  sh.set("character", "qiuqiu");  s_changed = true; }
+                            "char_nimbo"   => { radio("char", "char_nimbo");   sh.set("character", "nimbo");   s_changed = true; }
+                            "char_twinkle" => { radio("char", "char_twinkle"); sh.set("character", "twinkle"); s_changed = true; }
+                            "char_claw"    => { radio("char", "char_claw");    sh.set("character", "claw");    s_changed = true; }
+                            "char_random"  => { radio("char", "char_random");  sh.set("character", "random");  s_changed = true; }
                             // ── 布尔 toggle ──
                             "toggle_autostart" => {
                                 let cur = sh.0.lock().unwrap().autostart;
                                 sh.set("autostart", !cur); s_changed = true;
                                 if let Some(ref it) = *items_state.0.lock().unwrap() { let _ = it.autostart.set_checked(!cur); }
                             }
-                            "toggle_dnd" => {
-                                let cur = sh.0.lock().unwrap().respect_dnd;
-                                sh.set("respect_dnd", !cur); s_changed = true;
-                                if let Some(ref it) = *items_state.0.lock().unwrap() { let _ = it.respect_dnd.set_checked(!cur); }
-                            }
+                            // 勿扰不再提供开关：始终跟随系统专注模式（menu_strings 里已移除该项）
                             // ── 显示/隐藏小组件 ──
                             "toggle_visible" => {
                                 let cur = sh.0.lock().unwrap().widget_visible;
@@ -2114,7 +2149,6 @@ fn main() {
             set_position,
             update_refresh_interval,
             toggle_autostart_setting,
-            toggle_dnd_setting,
             open_external,
             report_fe_error,
         ])

@@ -24,9 +24,102 @@ import emotionsJs from "./emotion-ball/emotions.js?raw";
 import ballJs from "./emotion-ball/ball.js?raw";
 import engineJs from "./emotion-ball/engine.js?raw";
 
+// 云宝 / 亮亮（aora-bot mood-mates 引擎，纯前端 SVG 角色，无 HTTP 依赖）
+import mmGeometry from "./mood-mates/geometry.js?raw";
+import mmRender from "./mood-mates/render.js?raw";
+import mmFeatures from "./mood-mates/features.js?raw";
+import mmFx from "./mood-mates/fx.js?raw";
+import mmEmotions from "./mood-mates/emotions.js?raw";
+import mmEngine from "./mood-mates/engine.js?raw";
+import mmNimbo from "./mood-mates/nimbo.js?raw";
+import mmTwinkle from "./mood-mates/twinkle.js?raw";
+// pixel Claw（clawd-pet，纯 CSS 动画 SVG）
+import clawIdle from "./claw/idle.svg?raw";
+import clawHappy from "./claw/happy.svg?raw";
+import clawSleeping from "./claw/sleeping.svg?raw";
+import clawCelebrating from "./claw/celebrating.svg?raw";
+import clawYawning from "./claw/yawning.svg?raw";
+import clawSick from "./claw/sick.svg?raw";
+import clawError from "./claw/error.svg?raw";
+import clawSedentary from "./claw/sedentary.svg?raw";
+
 const EB_LIBS = [ringsJs, emotionsJs, ballJs, engineJs]
   .map((s) => s.replace(/<\/script>/gi, "<\\/script>"))
   .join("</script>\n<script>");
+
+const MM_LIBS = [mmGeometry, mmRender, mmFeatures, mmFx, mmEmotions, mmEngine]
+  .map((s) => s.replace(/<\/script>/gi, "<\\/script>"))
+  .join("</script>\n<script>");
+
+// 把健康派生表情 id 映射成 claw 的状态 SVG（仅做粗略情绪分流）
+function clawStateFor(eid, sed) {
+  if (sed) return "sedentary";
+  if (eid === "00") return "sleeping";
+  if (eid === "33" || eid === "10") return "celebrating";
+  if (eid === "19" || eid === "03" || eid === "13") return "happy";
+  if (eid === "21" || eid === "34") return "sick";
+  if (eid === "39" || eid === "40") return "error";
+  return "idle";
+}
+
+// 按当前角色生成 iframe 文档（完全离线自包含，无 HTTP 服务）
+function buildWidgetDoc(character, eid, sed) {
+  const HEAD = "<!doctype html><html><head><meta charset='utf-8'>" +
+    "<style>html,body{margin:0;padding:0;background:transparent;overflow:hidden;width:100%;height:100%;-webkit-user-select:none;user-select:none}" +
+    "#bot{width:100%;height:100%;display:flex;align-items:center;justify-content:center}#bot svg{display:block;width:100%;height:100%}</style></head><body><div id='bot'></div>" +
+    "<script>document.addEventListener('contextmenu',function(e){e.preventDefault();});document.addEventListener('selectstart',function(e){e.preventDefault();});</script>";
+  const esc = (s) => s.replace(/<\/script>/gi, "<\\/script>");
+  const SED = sed ? "true" : "false";
+
+  if (character === "nimbo" || character === "twinkle") {
+    const charId = character === "nimbo" ? "nimbo" : "twinkle";
+    const charFile = charId === "nimbo" ? esc(mmNimbo) : esc(mmTwinkle);
+    return HEAD +
+      "<script>" + MM_LIBS + "</script>" +
+      "<script>" + charFile + "</script>" +
+      "<script>(function(){try{" +
+        "var m=MoodMates.create(document.getElementById('bot'),{character:'" + charId + "',emotion:'" + eid + "',idle:true,eyeScale:1.5});" +
+        "window.__char=m;window.__charReady=true;" +
+        "var ids=['10','19','03','13','33','30','11','18','02','15','12','04','20','35','36','31'];var ai=0;" +
+        "window.__cycleEmotion=function(){var arr=" + SED + "?['21','34']:ids;ai=(ai+1)%arr.length;try{m.setEmotion(arr[ai]);}catch(e){}};" +
+      "}catch(e){document.title='ERR:'+(e.message||e).slice(0,80)}})()</script>" +
+      "</body></html>";
+  }
+
+  if (character === "claw") {
+    const svgs = {
+      idle: clawIdle, happy: clawHappy, sleeping: clawSleeping, celebrating: clawCelebrating,
+      yawning: clawYawning, sick: clawSick, error: clawError, sedentary: clawSedentary,
+    };
+    const st = clawStateFor(eid, sed);
+    const json = JSON.stringify(svgs);
+    return HEAD +
+      "<script>(function(){try{" +
+        "var svgs=" + json + ";var el=document.getElementById('bot');" +
+        "function show(k){try{el.innerHTML=svgs[k]||svgs.idle;}catch(e){}}" +
+        "show(" + JSON.stringify(st) + ");" +
+        "window.__char={setGaze:function(){},clearGaze:function(){}};window.__charReady=true;" +
+        "var ks=['idle','happy','celebrating','yawning','sleeping'];var ki=0;" +
+        "window.__cycleEmotion=function(){ki=(ki+1)%ks.length;show(ks[ki]);};" +
+      "}catch(e){document.title='ERR:'+(e.message||e).slice(0,80)}})()</script>" +
+      "</body></html>";
+  }
+
+  // 默认：球球（emotion-ball）
+  return HEAD +
+    "<script>" + EB_LIBS + "</script>" +
+    "<script>(function(){try{" +
+      "var b=EmotionBall.create(document.getElementById('bot')," +
+      "{emotion:'" + eid + "',shape:'blob',eyeScale:1.7,idle:true,lite:true,autostart:true});" +
+      "window.__char=b;window.__charReady=true;" +
+      "var SED=" + SED + ";" +
+      "var ac=['10','19','03','13','14','16','30','11','18','33','02','15','12','04','20','35','36','31','39','40'];" +
+      "var ai=0;" +
+      "window.__cycleEmotion=function(){var arr=SED?['21','34']:ac;ai=(ai+1)%arr.length;b.setEmotion(arr[ai]);};" +
+      "if(!SED){window.__autoTimer=setInterval(window.__cycleEmotion,4500);}" +
+    "}catch(e){document.title='ERR:'+(e.message||e).slice(0,80)}})()</script>" +
+    "</body></html>";
+}
 
 // ── Apple system palette ─────────────────────────────────────────────────────
 const C_DARK = {
@@ -295,20 +388,6 @@ function SettingsPanel({ draft, setDraft, onSave, onCancel, busy, rerender, syst
         </div>
       </div>
 
-      {/* ── 勿扰 ── */}
-      <div style={rowStyle}>
-        <span style={{ fontSize: 10.5, fontWeight: 600, color: C.second, maxWidth: 200, lineHeight: 1.25 }}>{T("respectDnd")}</span>
-        <div onClick={() => {
-          const next = !draft.respect_dnd;
-          set("respect_dnd", next);
-          invoke("toggle_dnd_setting", { enabled: next }).catch(() => {});
-        }}
-          style={{ width: 38, height: 21, borderRadius: 99, padding: 2, cursor: "pointer", flexShrink: 0,
-            background: draft.respect_dnd ? C.green : "rgba(128,128,128,0.3)" }}>
-          <div style={{ width: 17, height: 17, borderRadius: "50%", background: "#fff", marginLeft: draft.respect_dnd ? 17 : 0, transition: "margin .2s" }} />
-        </div>
-      </div>
-
       <div style={{ height: 1, background: C.hairline, margin: "10px 0 4px" }} />
 
       {/* ── Google 健康（浏览器引导 + 数据 API 延迟测试）── */}
@@ -349,7 +428,7 @@ function SettingsPanel({ draft, setDraft, onSave, onCancel, busy, rerender, syst
   </div >
 );
 }
-function Widget({ data, settings, onRefresh, onReset, justResetAt, sedPopRef, dndActive, bottomTip, forceWidgetPop, setForceWidgetPop }) {
+function Widget({ data, settings, character, onRefresh, onReset, justResetAt, sedPopRef, dndActive, bottomTip, forceWidgetPop, setForceWidgetPop }) {
   const t = data.today || {};
   const steps = t.steps || 0;
   const active = t.active_minutes || 0;
@@ -374,23 +453,7 @@ function Widget({ data, settings, onRefresh, onReset, justResetAt, sedPopRef, dn
   const effIdle = justReset ? 0 : idleMin;
   const eid = computeBallEmotion(t, effSed);
 
-  const ballDoc =
-    "<!doctype html><html><head><meta charset='utf-8'>" +
-    "<style>html,body{margin:0;padding:0;background:transparent;overflow:hidden;width:100%;height:100%;-webkit-user-select:none;user-select:none}" +
-    "#bot{width:100%;height:100%}#bot svg{display:block;width:100%;height:100%}</style></head><body><div id='bot'></div>" +
-    "<script>document.addEventListener('contextmenu',function(e){e.preventDefault();});document.addEventListener('selectstart',function(e){e.preventDefault();});</script>" +
-    "<script>" + EB_LIBS + "</script>" +
-    "<script>(function(){try{" +
-    "var b=EmotionBall.create(document.getElementById('bot')," +
-    "{emotion:'" + eid + "',shape:'blob',eyeScale:1.7,idle:true,lite:true,autostart:true});" +
-    "b.setGaze(0,0);window.__ball=b;window.__ballReady=true;" +
-    "var SED=" + (effSed ? "true" : "false") + ";" +
-    "var ac=['10','19','03','13','14','16','30','11','18','33','02','15','12','04','20','35','36','31','39','40'];" +
-    "var ai=0;" +
-    "window.__cycleEmotion=function(){var arr=SED?['21','34']:ac;ai=(ai+1)%arr.length;b.setEmotion(arr[ai]);};" +
-    "if(!SED){window.__autoTimer=setInterval(window.__cycleEmotion,4500);}" +
-    "}catch(e){document.title='ERR:'+(e.message||e).slice(0,80)}})()</script>" +
-    "</body></html>";
+  const ballDoc = buildWidgetDoc(character, eid, effSed);
 
   const ballIframe = (
     <iframe
@@ -404,7 +467,7 @@ function Widget({ data, settings, onRefresh, onReset, justResetAt, sedPopRef, dn
         let tries = 0;
         const setup = function () {
           const w = el.contentWindow;
-          if (!w || !w.__ballReady) { if (tries++ < 50) setTimeout(setup, 100); return; }
+          if (!w || !w.__charReady) { if (tries++ < 50) setTimeout(setup, 100); return; }
           try {
             w.document.addEventListener("click", function () {
               try { w.__cycleEmotion(); } catch (e) {}
@@ -424,10 +487,10 @@ function Widget({ data, settings, onRefresh, onReset, justResetAt, sedPopRef, dn
                 let ny = clampN((e.clientY - cy) / R, -1, 1);
                 nx = clampN(nx, -TH, TH);
                 ny = clampN(ny, -TH, TH);
-                w.__ball.setGaze(nx, ny);
+                w.__char.setGaze(nx, ny);
               } catch (err) {}
             };
-            const onLeave = function () { try { w.__ball.clearGaze(); } catch (err) {} };
+            const onLeave = function () { try { w.__char.clearGaze(); } catch (err) {} };
             window.addEventListener("mousemove", onMove);
             document.addEventListener("mouseleave", onLeave);
             window.addEventListener("blur", onLeave);
@@ -445,7 +508,7 @@ function Widget({ data, settings, onRefresh, onReset, justResetAt, sedPopRef, dn
     const rec = JSON.parse(localStorage.getItem(SED_POP_KEY) || "null");
     popDismissed = !!(rec && rec.date === t.date && rec.idle === idleMin);
   } catch (e) {}
-  const dndBlock = settings.respect_dnd && dndActive;
+  const dndBlock = dndActive;
   const snoozeUntil = Number(t.snooze_until || 0);
   const snoozed = snoozeUntil > Date.now();
   const showSedPop = (effSed || forceWidgetPop) && effIdle != null && !popDismissed && !dndBlock && !snoozed;
@@ -742,6 +805,13 @@ export default function App() {
 
   const [dndActive, setDndActive] = useState(false);
 
+  // 桌面伙伴角色：actualChar 为当前实际渲染的角色；characterPref 来自菜单设置
+  // （'random' 时每 3 分钟在四个角色间轮换，其余直接锁定该角色）
+  const [activeChar, setActiveChar] = useState("qiuqiu");
+  const activeCharRef = useRef("qiuqiu");
+  activeCharRef.current = activeChar;
+  const [characterPref, setCharacterPref] = useState(null); // null = 尚未读回设置
+
   // 系统勿扰（Focus）实时同步：后端监听 Control Center 广播后推送，无需等下次轮询
   useEffect(() => {
     if (!tauriAvailable()) return;
@@ -835,6 +905,7 @@ export default function App() {
       const s = JSON.parse(await invoke("get_settings"));
       settingsRef.current = s;
       setSettings(s);
+      setCharacterPref(s.character || "qiuqiu");
       const lang = s.language || "zh-CN";
       setLang(lang);
       // 主动查询系统外观：启动时的 appearance-changed 事件可能早于监听器注册而丢失，
@@ -894,8 +965,8 @@ export default function App() {
           setAiThinking(false);
           setAiTip(null);
         }
-        // 勿扰检测（仅久坐时查）
-        if (tauriAvailable() && today.sedentary && s && s.respect_dnd) {
+        // 勿扰检测（仅久坐时查）：始终跟随系统专注模式（已移除用户开关）
+        if (tauriAvailable() && today.sedentary && s) {
           try { setDndActive(await invoke("is_dnd_active_cmd")); } catch (e) {}
         } else {
           setDndActive(false);
@@ -911,7 +982,7 @@ export default function App() {
           if (tauriAvailable()) {
             setForceWidgetPop(true);
             let dnd = false;
-            if (s && s.respect_dnd) { try { dnd = await invoke("is_dnd_active_cmd"); } catch (e) {} }
+            if (s) { try { dnd = await invoke("is_dnd_active_cmd"); } catch (e) {} }
             if (!dnd && !snoozed2) {
               try { await invoke("show_sed_popover"); } catch (e) {}
             }
@@ -1019,6 +1090,7 @@ export default function App() {
           const s = JSON.parse(e.payload);
           settingsRef.current = s;
           setSettings(s);
+          setCharacterPref(s.character || "qiuqiu");
           setLang(s.language || "zh-CN");
           const dark = s.theme === "dark" ? true : s.theme === "light" ? false : systemDark;
           C = dark ? C_DARK : C_LIGHT;
@@ -1045,6 +1117,25 @@ export default function App() {
     return () => { if (unlisten) unlisten(); };
   }, [systemDark, rerender]);
 
+  // 角色选择 / 随机轮换：菜单设置 character='random' 时每 3 分钟换一个角色
+  useEffect(() => {
+    if (characterPref !== "random") {
+      setActiveChar(characterPref || "qiuqiu");
+      return;
+    }
+    const pool = ["qiuqiu", "nimbo", "twinkle", "claw"];
+    const pick = () => {
+      let next = pool[Math.floor(Math.random() * pool.length)];
+      if (next === activeCharRef.current && pool.length > 1) {
+        next = pool[(pool.indexOf(next) + 1) % pool.length];
+      }
+      setActiveChar(next);
+    };
+    pick();
+    const id = setInterval(pick, 3 * 60 * 1000);
+    return () => clearInterval(id);
+  }, [characterPref]);
+
   useEffect(() => {
     // 关键：先等设置从磁盘读回（含 llm_base_url/key），再首次拉数据。
     // 否则 load() 里 settingsRef 还是空，AI 调用被跳过且签名已消费，之后轮询永不再调（蓝点根因）
@@ -1064,6 +1155,7 @@ export default function App() {
         <Widget
           data={data}
           settings={settings || {}}
+          character={activeChar}
           onRefresh={onRefresh}
           onReset={onReset}
           justResetAt={justResetAt}
