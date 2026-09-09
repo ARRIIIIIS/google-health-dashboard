@@ -33,15 +33,8 @@ import mmEmotions from "./mood-mates/emotions.js?raw";
 import mmEngine from "./mood-mates/engine.js?raw";
 import mmNimbo from "./mood-mates/nimbo.js?raw";
 import mmTwinkle from "./mood-mates/twinkle.js?raw";
-// pixel Claw（clawd-pet，纯 CSS 动画 SVG）
-import clawIdle from "./claw/idle.svg?raw";
-import clawHappy from "./claw/happy.svg?raw";
-import clawSleeping from "./claw/sleeping.svg?raw";
-import clawCelebrating from "./claw/celebrating.svg?raw";
-import clawYawning from "./claw/yawning.svg?raw";
-import clawSick from "./claw/sick.svg?raw";
-import clawError from "./claw/error.svg?raw";
-import clawSedentary from "./claw/sedentary.svg?raw";
+// pixel Claw（clawd-pet，148 个纯 SVG 状态，经 src/claw/index.js 以 glob 读入）
+import { CLAW, CLAW_ORDER } from "./claw/index.js";
 
 const EB_LIBS = [ringsJs, emotionsJs, ballJs, engineJs]
   .map((s) => s.replace(/<\/script>/gi, "<\\/script>"))
@@ -52,14 +45,17 @@ const MM_LIBS = [mmGeometry, mmRender, mmFeatures, mmFx, mmEmotions, mmEngine]
   .join("</script>\n<script>");
 
 // 把健康派生表情 id 映射成 claw 的状态 SVG（仅做粗略情绪分流）
-function clawStateFor(eid, sed) {
-  if (sed) return "sedentary";
-  if (eid === "00") return "sleeping";
-  if (eid === "33" || eid === "10") return "celebrating";
-  if (eid === "19" || eid === "03" || eid === "13") return "happy";
-  if (eid === "21" || eid === "34") return "sick";
-  if (eid === "39" || eid === "40") return "error";
-  return "idle";
+// 把健康派生表情 id 映射成 clawd-pet 的某个状态 slug（仅做粗略情绪分流）
+function clawSlugFor(eid, sed) {
+  if (sed) return "clawd-meditating";
+  if (eid === "00") return "clawd-sleeping";
+  if (eid === "33" || eid === "10") return "clawd-celebrating";
+  if (eid === "19" || eid === "03" || eid === "13") return "clawd-happy";
+  if (eid === "21") return "clawd-angry";
+  if (eid === "34" || eid === "39" || eid === "40") return "clawd-error";
+  if (eid === "15") return "clawd-sick";
+  if (eid === "02") return "clawd-idle-living";
+  return "clawd-idle-living";
 }
 
 // 按当前角色生成 iframe 文档（完全离线自包含，无 HTTP 服务）
@@ -87,20 +83,18 @@ function buildWidgetDoc(character, eid, sed) {
   }
 
   if (character === "claw") {
-    const svgs = {
-      idle: clawIdle, happy: clawHappy, sleeping: clawSleeping, celebrating: clawCelebrating,
-      yawning: clawYawning, sick: clawSick, error: clawError, sedentary: clawSedentary,
-    };
-    const st = clawStateFor(eid, sed);
-    const json = JSON.stringify(svgs);
+    const st = clawSlugFor(eid, sed);
+    // 全量状态：{ slug: '<svg...>', ... } + 有序 slug 列表，全部内联进 iframe
+    const json = JSON.stringify(CLAW);
+    const order = JSON.stringify(CLAW_ORDER);
     return HEAD +
       "<script>(function(){try{" +
-        "var svgs=" + json + ";var el=document.getElementById('bot');" +
-        "function show(k){try{el.innerHTML=svgs[k]||svgs.idle;}catch(e){}}" +
+        "var svgs=" + json + ";var order=" + order + ";var el=document.getElementById('bot');" +
+        "function show(k){try{el.innerHTML=svgs[k]||svgs[order[0]];}catch(e){}}" +
         "show(" + JSON.stringify(st) + ");" +
         "window.__char={setGaze:function(){},clearGaze:function(){}};window.__charReady=true;" +
-        "var ks=['idle','happy','celebrating','yawning','sleeping'];var ki=0;" +
-        "window.__cycleEmotion=function(){ki=(ki+1)%ks.length;show(ks[ki]);};" +
+        "var ki=order.indexOf(" + JSON.stringify(st) + ");if(ki<0)ki=0;" +
+        "window.__cycleEmotion=function(){ki=(ki+1)%order.length;show(order[ki]);};" +
       "}catch(e){document.title='ERR:'+(e.message||e).slice(0,80)}})()</script>" +
       "</body></html>";
   }
