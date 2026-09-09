@@ -1481,10 +1481,10 @@ fn show_sed_popover(app: AppHandle) -> Result<(), String> {
                     "[show_sed_popover] CG status=({:.0},{:.0})+{:.0}x{:.0} | Tauri popup=({:.1},{:.1}) disp=({:.0},{:.0})+{:.0}x{:.0} primary={}\n",
                     sx, sy, sw, sh, tx, ty, d.x, d.y, d.w, d.h, d.is_primary
                 );
-                let _ = std::fs::write(
-                    "/Users/dfrobot/Library/Application Support/com.arrhealth.healthdashboard/hd_popover_debug.txt",
-                    &dbg,
-                );
+                // 调试日志写入应用数据目录（动态路径，不硬编码本机用户路径）
+                if let Ok(dir) = app.path().app_data_dir() {
+                    let _ = std::fs::write(dir.join("hd_popover_debug.txt"), &dbg);
+                }
                 eprintln!("[health] {}", dbg.trim());
                 target_pos = Some((tx, ty));
             }
