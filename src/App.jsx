@@ -448,6 +448,67 @@ function SettingsPanel({ draft, setDraft, onSave, onCancel, busy, rerender, syst
     >
       <div style={{ fontSize: 13, fontWeight: 700, color: C.label, marginBottom: 6 }}>{T("settingsTitle")}</div>
 
+      {/* ── App 名称与图标（自定义，置顶）── */}
+      <div style={{ padding: "10px 12px", borderRadius: 14, border: "1px solid " + C.hairline, background: "rgba(128,128,128,0.06)" }}>
+        <div style={{ fontSize: 11, fontWeight: 700, color: C.label, marginBottom: 7 }}>{"App 名称与图标"}</div>
+        <label style={labelStyle}>{"App 名称"}</label>
+        <input
+          type="text"
+          value={draft.app_name || ""}
+          onChange={(e) => set("app_name", e.target.value)}
+          placeholder={T("appTitle")}
+          style={inputStyle}
+        />
+        <label style={labelStyle}>{"图标"}</label>
+        <div style={{ display: "flex", gap: 6, flexWrap: "wrap", alignItems: "center" }}>
+          {/* 当前图标预览 */}
+          <div style={{ width: 26, height: 26, borderRadius: 6, border: "1px solid " + C.hairline, overflow: "hidden", display: "flex", alignItems: "center", justifyContent: "center", background: "rgba(128,128,128,0.12)", flexShrink: 0 }}>
+            {iconPreview(draft.custom_icon)}
+          </div>
+          {/* 预设图标 */}
+          {[["preset:teal","48,209,88"],["preset:blue","10,132,255"],["preset:orange","255,159,10"],["preset:purple","175,82,222"],["preset:red","255,69,58"]].map(([pid, rgb]) => {
+            const c = rgb.split(",").map(Number);
+            const active = draft.custom_icon === pid;
+            return (
+              <div key={pid} onClick={() => set("custom_icon", pid)}
+                style={{ width: 26, height: 26, borderRadius: 6, cursor: "pointer", border: active ? "2px solid " + C.blue : "1px solid " + C.hairline, boxSizing: "border-box",
+                  background: `rgb(${c[0]},${c[1]},${c[2]})`, position: "relative", flexShrink: 0 }}>
+                <div style={{ position: "absolute", inset: 7, borderRadius: "50%", border: "2px solid rgba(255,255,255,0.85)" }} />
+              </div>
+            );
+          })}
+          {/* 上传 */}
+          <label style={{ width: 26, height: 26, borderRadius: 6, border: "1px dashed " + C.hairline, display: "flex", alignItems: "center", justifyContent: "center", cursor: "pointer", color: C.second, fontSize: 16, flexShrink: 0, background: "rgba(128,128,128,0.1)" }}>
+            +
+            <input
+              type="file"
+              accept="image/png,image/jpeg"
+              style={{ display: "none" }}
+              onChange={(e) => {
+                const f = e.target.files && e.target.files[0];
+                if (!f) return;
+                const rd = new FileReader();
+                rd.onload = () => {
+                  const dataUrl = rd.result;
+                  const b64 = String(dataUrl).split(",")[1] || "";
+                  set("custom_icon", "base64:" + b64);
+                };
+                rd.readAsDataURL(f);
+                e.target.value = "";
+              }}
+            />
+          </label>
+          {/* 重置 */}
+          <div onClick={() => { set("app_name", ""); set("custom_icon", ""); }}
+            style={{ fontSize: 9.5, fontWeight: 600, color: C.alert, border: "1px solid " + C.alert, borderRadius: 7, padding: "3px 9px", cursor: "pointer", marginLeft: "auto" }}>
+            {"重置"}
+          </div>
+        </div>
+        <div style={{ fontSize: 8.5, color: C.third, marginTop: 6, lineHeight: 1.35 }}>
+          {"图标应用到小组件左上角 + 菜单栏，保存后立即生效。"}
+        </div>
+      </div>
+
       {/* ── 久坐提醒（置顶高亮卡片：自定义阈值）── */}
       <div style={sedCard}>
         <div style={{ fontSize: 11, fontWeight: 700, color: C.amber, marginBottom: 7 }}>
@@ -509,68 +570,6 @@ function SettingsPanel({ draft, setDraft, onSave, onCancel, busy, rerender, syst
             {lbl}
           </div>
         ))}
-      </div>
-
-      {/* ── App 名称与图标（自定义）── */}
-      <div style={{ marginTop: 10, padding: "10px 12px", borderRadius: 14, border: "1px solid " + C.hairline, background: "rgba(128,128,128,0.06)" }}>
-        <div style={{ fontSize: 11, fontWeight: 700, color: C.label, marginBottom: 7 }}>{"App 名称与图标"}</div>
-        <label style={labelStyle}>{"App 名称"}</label>
-        <input
-          type="text"
-          value={draft.app_name || ""}
-          onChange={(e) => set("app_name", e.target.value)}
-          placeholder={T("appTitle")}
-          style={inputStyle}
-        />
-        <label style={labelStyle}>{"图标"}</label>
-        <div style={{ display: "flex", gap: 6, flexWrap: "wrap", alignItems: "center" }}>
-          {/* 当前图标预览 */}
-          <div style={{ width: 26, height: 26, borderRadius: 6, border: "1px solid " + C.hairline, overflow: "hidden", display: "flex", alignItems: "center", justifyContent: "center", background: "rgba(128,128,128,0.12)", flexShrink: 0 }}>
-            {iconPreview(draft.custom_icon)}
-          </div>
-          {/* 预设图标 */}
-          {[["preset:teal","48,209,88"],["preset:blue","10,132,255"],["preset:orange","255,159,10"],["preset:purple","175,82,222"],["preset:red","255,69,58"]].map(([pid, rgb]) => {
-            const c = rgb.split(",").map(Number);
-            const active = draft.custom_icon === pid;
-            return (
-              <div key={pid} onClick={() => set("custom_icon", pid)}
-                style={{ width: 26, height: 26, borderRadius: 6, cursor: "pointer", border: active ? "2px solid " + C.blue : "1px solid " + C.hairline, boxSizing: "border-box",
-                  background: `rgb(${c[0]},${c[1]},${c[2]})`, position: "relative", flexShrink: 0 }}>
-                <div style={{ position: "absolute", inset: 7, borderRadius: "50%", border: "2px solid rgba(255,255,255,0.85)" }} />
-              </div>
-            );
-          })}
-          {/* 上传 */}
-          <label style={{ width: 26, height: 26, borderRadius: 6, border: "1px dashed " + C.hairline, display: "flex", alignItems: "center", justifyContent: "center", cursor: "pointer", color: C.second, fontSize: 16, flexShrink: 0, background: "rgba(128,128,128,0.1)" }}>
-            +
-            <input
-              type="file"
-              accept="image/png,image/jpeg"
-              style={{ display: "none" }}
-              onChange={(e) => {
-                const f = e.target.files && e.target.files[0];
-                if (!f) return;
-                const rd = new FileReader();
-                rd.onload = () => {
-                  const dataUrl = rd.result;
-                  // 去掉前缀，只留 base64
-                  const b64 = String(dataUrl).split(",")[1] || "";
-                  set("custom_icon", "base64:" + b64);
-                };
-                rd.readAsDataURL(f);
-                e.target.value = "";
-              }}
-            />
-          </label>
-          {/* 重置 */}
-          <div onClick={() => { set("app_name", ""); set("custom_icon", ""); }}
-            style={{ fontSize: 9.5, fontWeight: 600, color: C.alert, border: "1px solid " + C.alert, borderRadius: 7, padding: "3px 9px", cursor: "pointer", marginLeft: "auto" }}>
-            {"重置"}
-          </div>
-        </div>
-        <div style={{ fontSize: 8.5, color: C.third, marginTop: 6, lineHeight: 1.35 }}>
-          {"图标应用到小组件左上角 + 菜单栏，保存后立即生效。"}
-        </div>
       </div>
 
       {/* ── 刷新间隔（预设）── */}
