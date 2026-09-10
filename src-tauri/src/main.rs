@@ -1945,7 +1945,13 @@ fn setup_save(body: &[u8], app: &AppHandle) -> String {
     if let Some(v) = val.get("llm_model").and_then(|x| x.as_str()) { s.llm_model = v.to_string(); }
     if let Some(v) = val.get("google_client_id").and_then(|x| x.as_str()) { s.google_client_id = v.to_string(); }
     if let Some(v) = val.get("google_client_secret").and_then(|x| x.as_str()) { s.google_client_secret = v.to_string(); }
+    if let Some(v) = val.get("app_name").and_then(|x| x.as_str()) { s.app_name = v.to_string(); }
+    if let Some(v) = val.get("custom_icon").and_then(|x| x.as_str()) { s.custom_icon = v.to_string(); }
+    if let Some(v) = val.get("dnd_follow").and_then(|x| x.as_bool()) { s.dnd_follow = v; }
     let _ = save_settings_file(app, &s);
+
+    // 1b) 应用自定义图标到菜单栏（若有）
+    apply_tray_icon(app, &s);
 
     // 2) ~/.google-health-mcp/config.json（合并，不破坏已有 token）
     let home = match app.path().home_dir() {

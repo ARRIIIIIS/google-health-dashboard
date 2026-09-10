@@ -577,6 +577,11 @@
       <span class="step-num">2</span>
       <span class="step-label" data-i18n="step2">AI 健康建议</span>
     </div>
+    <div class="step-bar" id="stepBar2" style="display:none"></div>
+    <div class="step-node" id="stepNode3" onclick="gotoStep(3)">
+      <span class="step-num">3</span>
+      <span class="step-label" data-i18n="step3">外观与标识</span>
+    </div>
   </div>
 
   <!-- 步骤 1：Google 健康数据 -->
@@ -722,6 +727,49 @@
     </div>
   </div>
 
+  <!-- 步骤 3：外观与标识 -->
+  <div class="step-panel" id="step3" style="display:none">
+    <div class="field">
+      <label data-i18n="appTitle3">App 名称与图标</label>
+      <div class="hint" data-i18n="appDesc3">自定义小组件左上角图标与标题、菜单栏图标。保存后立即生效。</div>
+      <input type="text" id="app_name" placeholder="健康仪表盘" data-i18n-ph="appNamePh">
+      <div class="hint" data-i18n="appNameHint">留空则使用默认名称。</div>
+    </div>
+
+    <div class="field">
+      <label data-i18n="iconLabel">图标</label>
+      <div id="iconPicker" style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-top:6px">
+        <div id="iconPreview" class="icon-cell" style="width:34px;height:34px;border-radius:8px;overflow:hidden;border:1px solid var(--border,#ccc);display:flex;align-items:center;justify-content:center;background:rgba(128,128,128,0.08)"></div>
+        <!-- 预设色块 -->
+        <div class="preset" data-id="preset:teal"   style="width:34px;height:34px;border-radius:8px;cursor:pointer;border:1px solid #ccc;background:rgb(48,209,88);position:relative"></div>
+        <div class="preset" data-id="preset:blue"   style="width:34px;height:34px;border-radius:8px;cursor:pointer;border:1px solid #ccc;background:rgb(10,132,255);position:relative"></div>
+        <div class="preset" data-id="preset:orange" style="width:34px;height:34px;border-radius:8px;cursor:pointer;border:1px solid #ccc;background:rgb(255,159,10);position:relative"></div>
+        <div class="preset" data-id="preset:purple" style="width:34px;height:34px;border-radius:8px;cursor:pointer;border:1px solid #ccc;background:rgb(175,82,222);position:relative"></div>
+        <div class="preset" data-id="preset:red"    style="width:34px;height:34px;border-radius:8px;cursor:pointer;border:1px solid #ccc;background:rgb(255,69,58);position:relative"></div>
+        <!-- 上传 -->
+        <label style="width:34px;height:34px;border-radius:8px;border:1px dashed #ccc;display:flex;align-items:center;justify-content:center;cursor:pointer;font-size:20px;color:#888">
+          +
+          <input type="file" id="iconUpload" accept="image/png,image/jpeg" style="display:none">
+        </label>
+        <!-- 重置 -->
+        <button type="button" class="btn-ghost" id="iconReset" style="margin-left:auto" data-i18n="iconReset">重置</button>
+      </div>
+      <div class="hint" data-i18n="iconHint">上传 PNG/JPG 或选预设色块；重置恢复默认。</div>
+    </div>
+
+    <div class="field">
+      <label style="display:flex;align-items:center;gap:10px;cursor:pointer">
+        <input type="checkbox" id="dnd_follow" style="width:16px;height:16px" checked>
+        <span data-i18n="dndLabel">跟随系统勿扰（专注模式时静默久坐提醒）</span>
+      </label>
+    </div>
+
+    <div class="actions">
+      <span class="status-msg" id="status3"></span>
+      <button class="btn" id="save3-btn" data-i18n="btnDone3" onclick="saveStep(3)">保存并完成</button>
+    </div>
+  </div>
+
   <!-- Security note -->
   <div class="secure-note" id="secureNote">
     <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
@@ -758,6 +806,16 @@
     subtitle: { zh: "配置 Google 健康数据与 AI 建议<br>所有内容仅保存在本机", en: "Configure Google health data &amp; AI tips<br>Everything stays on this device", ja: "Google の健康データと AI アドバイスを設定<br>すべてのデータは端末内に保存" },
     step1: { zh: "Google 健康数据", en: "Google Health Data", ja: "Google 健康データ" },
     step2: { zh: "AI 健康建议", en: "AI Health Tips", ja: "AI ヘルスアドバイス" },
+    step3: { zh: "外观与标识", en: "Appearance", ja: "外観" },
+    appTitle3: { zh: "App 名称与图标", en: "App Name & Icon", ja: "アプリ名とアイコン" },
+    appDesc3: { zh: "自定义小组件左上角图标与标题、菜单栏图标。保存后立即生效。", en: "Customize the widget's top-left icon & title, and menu bar icon. Applies immediately.", ja: "ウィジェット左上のアイコンとタイトル、メニューバーアイコンをカスタマイズ。保存後すぐ反映。" },
+    appNamePh: { zh: "健康仪表盘", en: "Health Dashboard", ja: "健康ダッシュボード" },
+    appNameHint: { zh: "留空则使用默认名称。", en: "Leave empty to use the default name.", ja: "空欄ならデフォルト名を使用。" },
+    iconLabel: { zh: "图标", en: "Icon", ja: "アイコン" },
+    iconHint: { zh: "上传 PNG/JPG 或选预设色块；重置恢复默认。", en: "Upload a PNG/JPG or pick a preset; Reset restores the default.", ja: "PNG/JPG をアップロードまたはプリセットを選択。リセットでデフォルトに戻す。" },
+    iconReset: { zh: "重置", en: "Reset", ja: "リセット" },
+    dndLabel: { zh: "跟随系统勿扰（专注模式时静默久坐提醒）", en: "Follow system Focus/DND (silence idle reminders)", ja: "システムの集中モードに追従（長時間着席リマインダーを抑制）" },
+    btnDone3: { zh: "保存并完成", en: "Save & Finish", ja: "保存して完了" },
     gTitle: { zh: "Google 健康数据", en: "Google Health Data", ja: "Google 健康データ" },
     gDesc: { zh: "从 Google 同步步数、心率、睡眠等数据。<br>需要 OAuth 2.0 凭据，按下方步骤 5 分钟即可完成。", en: "Sync steps, heart rate, sleep &amp; more from Google.<br>Requires OAuth 2.0 credentials — about 5 minutes.", ja: "歩数・心拍・睡眠などのデータを Google から同期。<br>OAuth 2.0 認証情報が必要です（約 5 分）。" },
     gHowto: { zh: "如何获取 Client ID 与 Secret？", en: "How to get Client ID & Secret?", ja: "Client ID と Secret の取得方法は？" },
@@ -920,18 +978,89 @@
     }
   }
 
+  /* ── 外观与标识：图标选择 ── */
+  var currentIcon = '';  // "" / "preset:<id>" / "base64:<data>"
+
+  function renderIconPreview() {
+    var box = document.getElementById('iconPreview');
+    if (!box) return;
+    box.innerHTML = '';
+    if (!currentIcon) return;
+    if (currentIcon.indexOf('base64:') === 0) {
+      var im = document.createElement('img');
+      im.src = 'data:image/png;base64,' + currentIcon.slice(7);
+      im.width = 30; im.height = 30; im.style.objectFit = 'cover'; im.style.borderRadius = '6px';
+      box.appendChild(im);
+    } else {
+      var map = { 'preset:teal':'48,209,88','preset:blue':'10,132,255','preset:orange':'255,159,10','preset:purple':'175,82,222','preset:red':'255,69,58' };
+      var c = map[currentIcon];
+      if (c) {
+        var d = document.createElement('div');
+        d.style.width = '30px'; d.style.height = '30px'; d.style.borderRadius = '50%';
+        d.style.background = 'rgb(' + c + ')'; d.style.boxShadow = 'inset 0 0 0 2px rgba(255,255,255,0.7)';
+        box.appendChild(d);
+      }
+    }
+  }
+
+  function initIconPicker() {
+    document.querySelectorAll('.preset').forEach(function (el) {
+      el.innerHTML = '<div style="position:absolute;inset:8px;border-radius:50%;border:2px solid rgba(255,255,255,0.85)"></div>';
+      el.addEventListener('click', function () {
+        currentIcon = el.getAttribute('data-id');
+        renderIconPreview();
+        // 高亮选中
+        document.querySelectorAll('.preset').forEach(function (p) {
+          p.style.borderColor = p === el ? 'var(--accent,#0A84FF)' : '#ccc';
+          p.style.borderWidth = p === el ? '2px' : '1px';
+        });
+      });
+    });
+    var up = document.getElementById('iconUpload');
+    if (up) up.addEventListener('change', function (e) {
+      var f = e.target.files && e.target.files[0];
+      if (!f) return;
+      var rd = new FileReader();
+      rd.onload = function () {
+        currentIcon = 'base64:' + String(rd.result).split(',')[1] || '';
+        renderIconPreview();
+        e.target.value = '';
+      };
+      rd.readAsDataURL(f);
+    });
+    var rs = document.getElementById('iconReset');
+    if (rs) rs.addEventListener('click', function () {
+      currentIcon = '';
+      document.getElementById('app_name').value = '';
+      document.getElementById('dnd_follow').checked = true;
+      renderIconPreview();
+      document.querySelectorAll('.preset').forEach(function (p) {
+        p.style.borderColor = '#ccc'; p.style.borderWidth = '1px';
+      });
+    });
+  }
+
   /* ── 分步导航 ── */
   function gotoStep(n) {
     document.getElementById('step1').style.display = n === 1 ? '' : 'none';
     document.getElementById('step2').style.display = n === 2 ? '' : 'none';
+    document.getElementById('step3').style.display = n === 3 ? '' : 'none';
     var n1 = document.getElementById('stepNode1');
     var n2 = document.getElementById('stepNode2');
+    var n3 = document.getElementById('stepNode3');
     var bar = document.getElementById('stepBar');
+    var bar2 = document.getElementById('stepBar2');
     n1.classList.toggle('active', n === 1);
     n2.classList.toggle('active', n === 2);
-    // done 状态：已保存过的步骤打勾
-    if (n === 2) { n1.classList.add('done'); n1.classList.remove('active'); }
-    bar.classList.toggle('filled', n === 2);
+    n3.classList.toggle('active', n === 3);
+    // 隐藏两个 bar，按当前步骤显示对应连接线
+    bar.style.display = n >= 1 && n <= 2 ? '' : 'none';
+    bar2.style.display = n >= 2 && n <= 3 ? '' : 'none';
+    // done 状态：已走过的步骤打勾
+    if (n === 2 || n === 3) { n1.classList.add('done'); n1.classList.remove('active'); }
+    if (n === 3) { n2.classList.add('done'); n2.classList.remove('active'); }
+    bar.classList.toggle('filled', n >= 2);
+    bar2.classList.toggle('filled', n >= 3);
     window.scrollTo({ top: 0, behavior: 'smooth' });
   }
 
@@ -944,14 +1073,17 @@
   function showSuccess() {
     document.getElementById('step1').style.display = 'none';
     document.getElementById('step2').style.display = 'none';
+    document.getElementById('step3').style.display = 'none';
     document.querySelector('.stepper').style.display = 'none';
     document.getElementById('secureNote').style.display = 'none';
     var v = document.getElementById('success');
     v.classList.add('show');
     var n1 = document.getElementById('stepNode1');
     var n2 = document.getElementById('stepNode2');
+    var n3 = document.getElementById('stepNode3');
     n1.classList.add('done'); n1.classList.remove('active');
     n2.classList.add('done'); n2.classList.remove('active');
+    n3.classList.add('done'); n3.classList.remove('active');
     window.scrollTo({ top: 0 });
   }
 
@@ -1010,16 +1142,20 @@
 
   /* ── 分步保存：只传当前步骤字段（后端为增量合并，不会清空另一组）── */
   async function saveStep(n) {
-    var btn = document.getElementById(n === 1 ? 'save1-btn' : 'save2-btn');
+    var btn = document.getElementById(n === 1 ? 'save1-btn' : n === 2 ? 'save2-btn' : 'save3-btn');
     btn.disabled = true;
-    setStatus(n === 1 ? 'status1' : 'status2', t('statusSaving'), 'info');
+    setStatus(n === 1 ? 'status1' : n === 2 ? 'status2' : 'status3', t('statusSaving'), 'info');
     var payload = n === 1 ? {
       google_client_id:     document.getElementById('gid').value.trim(),
       google_client_secret: document.getElementById('gsec').value.trim(),
-    } : {
+    } : n === 2 ? {
       llm_base_url: document.getElementById('lurl').value.trim(),
       llm_api_key:  document.getElementById('lkey').value.trim(),
       llm_model:    document.getElementById('lmod').value.trim(),
+    } : {
+      app_name:    document.getElementById('app_name').value.trim(),
+      custom_icon: currentIcon,
+      dnd_follow:  document.getElementById('dnd_follow').checked,
     };
     try {
       var res = await fetch('/api/save', {
@@ -1032,16 +1168,19 @@
         if (n === 1) {
           setStatus('status1', t('statusSavedNext'), 'ok');
           setTimeout(function () { gotoStep(2); }, 450);
+        } else if (n === 2) {
+          setStatus('status2', t('statusSavedNext'), 'ok');
+          setTimeout(function () { gotoStep(3); }, 450);
         } else {
-          setStatus('status2', t('statusSavedDone'), 'ok');
+          setStatus('status3', t('statusSavedDone'), 'ok');
           setTimeout(showSuccess, 700);
         }
       } else {
-        setStatus(n === 1 ? 'status1' : 'status2', t('statusFail') + (data.error || '?'), 'err');
+        setStatus(n === 1 ? 'status1' : n === 2 ? 'status2' : 'status3', t('statusFail') + (data.error || '?'), 'err');
         btn.disabled = false;
       }
     } catch (e) {
-      setStatus(n === 1 ? 'status1' : 'status2', t('statusConnFail') + e.message, 'err');
+      setStatus(n === 1 ? 'status1' : n === 2 ? 'status2' : 'status3', t('statusConnFail') + e.message, 'err');
       btn.disabled = false;
     }
   }
@@ -1054,6 +1193,7 @@
   // 初始化：应用语言 + 默认服务商
   applyLang();
   applyProvider();
+  initIconPicker();
 
   // 预填
   fetch('/api/load')
@@ -1064,6 +1204,10 @@
       if (d.llm_base_url)          document.getElementById('lurl').value = d.llm_base_url;
       if (d.llm_api_key)           document.getElementById('lkey').value = d.llm_api_key;
       if (d.llm_model)             document.getElementById('lmod').value = d.llm_model;
+      // 外观与标识预填
+      if (d.app_name)              document.getElementById('app_name').value = d.app_name;
+      if (d.custom_icon)           { currentIcon = d.custom_icon; renderIconPreview(); }
+      if (d.dnd_follow === false)  document.getElementById('dnd_follow').checked = false;
       // 根据已存 Base URL 推断服务商（只更新下拉与引导，不覆盖已存的自定义值）
       var prov = detectProvider(d.llm_base_url);
       if (prov && prov !== 'custom' && PROVIDERS[prov]) {
