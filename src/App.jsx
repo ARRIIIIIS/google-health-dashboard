@@ -466,6 +466,17 @@ function SettingsPanel({ draft, setDraft, onSave, onCancel, busy, rerender, syst
         </div>
       </div>
 
+      {/* ── 跟随系统勿扰开关 ── */}
+      <div style={rowStyle}>
+        <div style={{ fontSize: 10.5, fontWeight: 600, color: C.label }}>{"跟随系统勿扰"}</div>
+        <div onClick={() => set("dnd_follow", !(draft.dnd_follow !== false))} style={checkStyle(draft.dnd_follow !== false)}>
+          {(draft.dnd_follow !== false) && <div style={{ width: 8, height: 8, borderRadius: 2, background: "#fff" }} />}
+        </div>
+      </div>
+      <div style={{ fontSize: 8.5, color: C.third, marginTop: 2, lineHeight: 1.35 }}>
+        {"开启后，系统专注模式（勿扰）开启时不会弹久坐提醒；关闭则始终提醒。"}
+      </div>
+
       {/* ── 语言（单选）── */}
       <label style={labelStyle}>{T("language")}</label>
       <div style={{ display: "flex", flexDirection: "column", gap: 4, marginTop: 2 }}>
@@ -715,7 +726,7 @@ function Widget({ data, settings, appIdentity, character, onRefresh, onReset, ju
     const rec = JSON.parse(localStorage.getItem(SED_POP_KEY) || "null");
     popDismissed = !!(rec && rec.date === t.date && rec.idle === idleMin);
   } catch (e) {}
-  const dndBlock = dndActive;
+  const dndBlock = dndActive && (settings ? settings.dnd_follow !== false : true);
   const snoozeUntil = Number(t.snooze_until || 0);
   const snoozed = snoozeUntil > Date.now();
   const showSedPop = (effSed || forceWidgetPop) && effIdle != null && !popDismissed && !dndBlock && !snoozed;

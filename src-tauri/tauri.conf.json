@@ -41,7 +41,8 @@
     "resources": [
       "resources/fetch_standalone.py",
       "resources/setup.html",
-      "icons/"
+      "icons/",
+      "icons/tray_white.png"
     ],
     "icon": [
       "icons/32x32.png",

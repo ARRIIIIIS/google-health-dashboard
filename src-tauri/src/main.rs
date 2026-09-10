@@ -71,7 +71,12 @@ struct Settings {
     /// 自定义图标："" = 默认；"preset:<id>" = 内置预设；"base64:<data>" = 用户上传（PNG）
     #[serde(default)]
     custom_icon: String,
+    /// 是否跟随系统勿扰（Focus）抑制久坐提醒。true = 系统勿扰时静默；false = 始终提醒。
+    #[serde(default = "default_true")]
+    dnd_follow: bool,
 }
+
+fn default_true() -> bool { true }
 
 impl Default for Settings {
     fn default() -> Self {
@@ -100,6 +105,7 @@ impl Default for Settings {
             gaze_radius: 80.0,
             app_name: String::new(),
             custom_icon: String::new(),
+            dnd_follow: true,
         }
     }
 }
@@ -237,7 +243,7 @@ fn base64_decode(s: &str) -> Result<Vec<u8>, ()> {
 fn apply_tray_icon(app: &AppHandle, s: &Settings) {
     let image = resolve_icon_image(app, s);
     let icon = image.unwrap_or_else(|| {
-        let icon_path = app.path().resource_dir().unwrap_or_default().join("icons/128x128.png");
+        let icon_path = app.path().resource_dir().unwrap_or_default().join("icons/tray_white.png");
         tauri::image::Image::from_path(&icon_path).unwrap_or_else(|_| {
             // 兜底：极小 1x1 透明占位，避免 set_icon 失败
             tauri::image::Image::new_owned(vec![0u8; 4], 1, 1)
@@ -2268,7 +2274,7 @@ fn main() {
                 eprintln!("[health] resource_dir: {:?}", resource_dir);
 
                 let icon = resolve_icon_image(app.handle(), &settings).unwrap_or_else(|| {
-                    let icon_path = resource_dir.join("icons/128x128.png");
+                    let icon_path = resource_dir.join("icons/tray_white.png");
                     eprintln!("[health] icon_path: {:?}", icon_path);
                     Image::from_path(&icon_path).unwrap_or_else(|e| {
                         eprintln!("[health] icon load failed: {:?}", e);
