@@ -7,7 +7,7 @@
 """
 import sys, os, json, tempfile, time
 from datetime import datetime
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), "src-tauri", "resources"))
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src-tauri", "resources"))
 import fetch_standalone as fs
 
 REAL = os.path.expanduser("~/Library/Application Support/com.arrhealth.healthdashboard/data.json")

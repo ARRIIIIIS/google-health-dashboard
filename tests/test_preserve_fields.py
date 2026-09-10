@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """回归测试：采集器写盘前必须保留 App 托管的交互字段，不能清零。"""
 import sys, os
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), "src-tauri", "resources"))
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src-tauri", "resources"))
 import fetch_standalone as fs
 
 def eq(label, got, want):
