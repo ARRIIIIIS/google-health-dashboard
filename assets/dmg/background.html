@@ -4,16 +4,23 @@
 <meta charset="utf-8">
 <title>dmg background</title>
 <style>
-  html,body{width:660px;height:420px;margin:0;padding:0;overflow:hidden}
+  /* 画布 660×488：上面 420 是设计区，下面 68 只铺渐变。
+     Finder 会把图按「像素当点」画，所以导出时必须写 144dpi，
+     这样 1320×976 的图才会渲染成 660×488 点。 */
+  html,body{width:660px;height:488px;margin:0;padding:0;overflow:hidden}
   body{
     position:relative;
     font-family:-apple-system,"SF Pro Text","PingFang SC",system-ui,sans-serif;
     font-variant-numeric:tabular-nums;
     -webkit-font-smoothing:antialiased;
-    background:linear-gradient(180deg,#212124 0%,#161618 100%);
+    background:#161618;
     color:#fff;
   }
-  .glow{position:absolute;inset:0;background:radial-gradient(560px 320px at 50% 44%,rgba(255,255,255,.055),transparent 72%)}
+  /* 渐变只铺设计区高度，多出来的部分用渐变末端色，接缝看不出 */
+  .bg{position:absolute;left:0;top:0;width:660px;height:420px;
+      background:linear-gradient(180deg,#212124 0%,#161618 100%)}
+  .glow{position:absolute;left:0;top:0;width:660px;height:420px;
+        background:radial-gradient(560px 320px at 50% 44%,rgba(255,255,255,.055),transparent 72%)}
 
   .brand{position:absolute;left:0;right:0;top:44px;text-align:center}
   .brand-t{font-size:22px;font-weight:600;letter-spacing:-.01em;color:#fff}
@@ -22,12 +29,14 @@
   .guide{position:absolute;left:50%;top:208px;transform:translate(-50%,-50%);width:96px;height:12px}
   .guide svg{display:block;width:96px;height:12px}
 
-  .foot{position:absolute;left:0;right:0;bottom:34px;text-align:center}
+  /* 用 top 定位而不是 bottom：画布加高后位置不变，仍在设计区内 */
+  .foot{position:absolute;left:0;right:0;top:350px;text-align:center}
   .foot-m{font-size:13px;color:#A1A1A6}
   .foot-s{font-size:9px;color:#5A5A5F;margin-top:9px;letter-spacing:.02em}
 </style>
 </head>
 <body>
+  <div class="bg"></div>
   <div class="glow"></div>
 
   <div class="brand">

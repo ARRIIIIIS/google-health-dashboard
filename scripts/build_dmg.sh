@@ -38,8 +38,10 @@ SETFILE=/Library/Developer/CommandLineTools/usr/bin/SetFile
 GETFILE=/Library/Developer/CommandLineTools/usr/bin/GetFileInfo
 PY="${PYTHON:-python3}"
 
-# 窗口 bounds：内容区 660×420 + 标题栏 28 → 高 448
-BOUNDS="{{360, 160}, {660, 448}}"
+# 窗口 bounds：内容区 420 + 标题栏 28 + 工具栏 40 + 路径栏 28 = 516。
+# .DS_Store 的 ShowToolbar=false 在 macOS 26 上不被采纳，所以按「工具栏一定在」配高度；
+# 背景图画 660×488（多出 68 点纯渐变）兜住工具栏真被隐藏时多出来的内容区。
+BOUNDS="{{500, 335}, {660, 516}}"
 
 for f in "$APP" "$DSSTORE" "$BG"; do
   [ -e "$f" ] || { echo "缺少: $f"; exit 1; }
