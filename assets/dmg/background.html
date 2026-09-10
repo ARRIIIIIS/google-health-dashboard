@@ -1,0 +1,50 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>dmg background</title>
+<style>
+  html,body{width:660px;height:420px;margin:0;padding:0;overflow:hidden}
+  body{
+    position:relative;
+    font-family:-apple-system,"SF Pro Text","PingFang SC",system-ui,sans-serif;
+    font-variant-numeric:tabular-nums;
+    -webkit-font-smoothing:antialiased;
+    background:linear-gradient(180deg,#212124 0%,#161618 100%);
+    color:#fff;
+  }
+  .glow{position:absolute;inset:0;background:radial-gradient(560px 320px at 50% 44%,rgba(255,255,255,.055),transparent 72%)}
+
+  .brand{position:absolute;left:0;right:0;top:44px;text-align:center}
+  .brand-t{font-size:22px;font-weight:600;letter-spacing:-.01em;color:#fff}
+  .brand-s{font-size:12px;color:#A1A1A6;margin-top:7px}
+
+  .guide{position:absolute;left:50%;top:208px;transform:translate(-50%,-50%);width:96px;height:12px}
+  .guide svg{display:block;width:96px;height:12px}
+
+  .foot{position:absolute;left:0;right:0;bottom:34px;text-align:center}
+  .foot-m{font-size:13px;color:#A1A1A6}
+  .foot-s{font-size:9px;color:#5A5A5F;margin-top:9px;letter-spacing:.02em}
+</style>
+</head>
+<body>
+  <div class="glow"></div>
+
+  <div class="brand">
+    <div class="brand-t">Health Dashboard</div>
+    <div class="brand-s">v3.0.0 · 菜单栏健康小组件</div>
+  </div>
+
+  <div class="guide">
+    <svg viewBox="0 0 96 12" fill="none">
+      <path d="M0 6h78" stroke="rgba(255,255,255,.30)" stroke-width="1.5"/>
+      <path d="M78 1.5 88 6 78 10.5z" fill="rgba(255,255,255,.30)"/>
+    </svg>
+  </div>
+
+  <div class="foot">
+    <div class="foot-m">拖拽到「应用程序」文件夹完成安装</div>
+    <div class="foot-s">首次打开若提示未知开发者，请在「系统设置 → 隐私与安全性」中允许</div>
+  </div>
+</body>
+</html>
