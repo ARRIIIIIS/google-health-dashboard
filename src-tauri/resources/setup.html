@@ -757,13 +757,6 @@
       <div class="hint" data-i18n="iconHint">上传 PNG/JPG 或选预设色块；重置恢复默认。</div>
     </div>
 
-    <div class="field">
-      <label style="display:flex;align-items:center;gap:10px;cursor:pointer">
-        <input type="checkbox" id="dnd_follow" style="width:16px;height:16px" checked>
-        <span data-i18n="dndLabel">跟随系统勿扰（专注模式时静默久坐提醒）</span>
-      </label>
-    </div>
-
     <div class="actions">
       <span class="status-msg" id="status3"></span>
       <button class="btn" id="save3-btn" data-i18n="btnDone3" onclick="saveStep(3)">保存并完成</button>
@@ -814,7 +807,6 @@
     iconLabel: { zh: "图标", en: "Icon", ja: "アイコン" },
     iconHint: { zh: "上传 PNG/JPG 或选预设色块；重置恢复默认。", en: "Upload a PNG/JPG or pick a preset; Reset restores the default.", ja: "PNG/JPG をアップロードまたはプリセットを選択。リセットでデフォルトに戻す。" },
     iconReset: { zh: "重置", en: "Reset", ja: "リセット" },
-    dndLabel: { zh: "跟随系统勿扰（专注模式时静默久坐提醒）", en: "Follow system Focus/DND (silence idle reminders)", ja: "システムの集中モードに追従（長時間着席リマインダーを抑制）" },
     btnDone3: { zh: "保存并完成", en: "Save & Finish", ja: "保存して完了" },
     gTitle: { zh: "Google 健康数据", en: "Google Health Data", ja: "Google 健康データ" },
     gDesc: { zh: "从 Google 同步步数、心率、睡眠等数据。<br>需要 OAuth 2.0 凭据，按下方步骤 5 分钟即可完成。", en: "Sync steps, heart rate, sleep &amp; more from Google.<br>Requires OAuth 2.0 credentials — about 5 minutes.", ja: "歩数・心拍・睡眠などのデータを Google から同期。<br>OAuth 2.0 認証情報が必要です（約 5 分）。" },
@@ -1032,7 +1024,6 @@
     if (rs) rs.addEventListener('click', function () {
       currentIcon = '';
       document.getElementById('app_name').value = '';
-      document.getElementById('dnd_follow').checked = true;
       renderIconPreview();
       document.querySelectorAll('.preset').forEach(function (p) {
         p.style.borderColor = '#ccc'; p.style.borderWidth = '1px';
@@ -1155,7 +1146,6 @@
     } : {
       app_name:    document.getElementById('app_name').value.trim(),
       custom_icon: currentIcon,
-      dnd_follow:  document.getElementById('dnd_follow').checked,
     };
     try {
       var res = await fetch('/api/save', {
@@ -1207,7 +1197,6 @@
       // 外观与标识预填
       if (d.app_name)              document.getElementById('app_name').value = d.app_name;
       if (d.custom_icon)           { currentIcon = d.custom_icon; renderIconPreview(); }
-      if (d.dnd_follow === false)  document.getElementById('dnd_follow').checked = false;
       // 根据已存 Base URL 推断服务商（只更新下拉与引导，不覆盖已存的自定义值）
       var prov = detectProvider(d.llm_base_url);
       if (prov && prov !== 'custom' && PROVIDERS[prov]) {

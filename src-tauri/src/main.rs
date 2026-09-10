@@ -381,6 +381,7 @@ struct MenuStrings {
     lang_en: String,
     lang_ja: String,
     autostart: String,
+    dnd_follow: String,
     character_sub: String,
     char_qiuqiu: String,
     char_nimbo: String,
@@ -422,6 +423,7 @@ struct MenuItems {
     sed_90: tauri::menu::CheckMenuItem<tauri::Wry>,
     visible: tauri::menu::CheckMenuItem<tauri::Wry>,
     autostart: tauri::menu::CheckMenuItem<tauri::Wry>,
+    dnd_follow: tauri::menu::CheckMenuItem<tauri::Wry>,
     char_qiuqiu: tauri::menu::CheckMenuItem<tauri::Wry>,
     char_nimbo: tauri::menu::CheckMenuItem<tauri::Wry>,
     char_twinkle: tauri::menu::CheckMenuItem<tauri::Wry>,
@@ -503,6 +505,7 @@ fn menu_strings(lang: &str) -> MenuStrings {
             lang_en: "English".into(),
             lang_ja: "Japanese".into(),
             autostart: "Launch at Login".into(),
+            dnd_follow: "Follow System Focus".into(),
             character_sub: "Companion".into(),
             char_qiuqiu: "Qiuqiu".into(),
             char_nimbo: "Nimbo".into(),
@@ -537,6 +540,7 @@ fn menu_strings(lang: &str) -> MenuStrings {
             lang_en: "English".into(),
             lang_ja: "日本語".into(),
             autostart: "ログイン時に起動".into(),
+            dnd_follow: "集中モードに追従".into(),
             character_sub: "キャラクター".into(),
             char_qiuqiu: "球球".into(),
             char_nimbo: "雲宝".into(),
@@ -571,6 +575,7 @@ fn menu_strings(lang: &str) -> MenuStrings {
             lang_en: "English".into(),
             lang_ja: "日本語".into(),
             autostart: "登录时启动".into(),
+            dnd_follow: "跟随系统勿扰".into(),
             character_sub: "桌搭伙伴".into(),
             char_qiuqiu: "球球".into(),
             char_nimbo: "云宝".into(),
@@ -682,6 +687,7 @@ fn build_main_menu(app: &AppHandle, s: &Settings) -> tauri::menu::Menu<tauri::Wr
     // ── 基础项 ──
     let toggle_visible = CheckMenuItem::with_id(app, "toggle_visible", &m.show_widget, true, s.widget_visible, None::<&str>).unwrap();
     let autostart  = CheckMenuItem::with_id(app, "toggle_autostart", &m.autostart,  true, s.autostart,    None::<&str>).unwrap();
+    let dnd_follow = CheckMenuItem::with_id(app, "dnd_follow", &m.dnd_follow, true, s.dnd_follow, None::<&str>).unwrap();
     let refresh_now = MenuItem::with_id(app, "refresh_now",  &m.refresh_now,  true, Some("R")).unwrap();
     let open_folder = MenuItem::with_id(app, "open_data_folder", &m.open_folder,  true, None::<&str>).unwrap();
     let setup_wizard_item = MenuItem::with_id(app, "open_setup", &m.setup_wizard, true, None::<&str>).unwrap();
@@ -700,6 +706,7 @@ fn build_main_menu(app: &AppHandle, s: &Settings) -> tauri::menu::Menu<tauri::Wr
     items.push(&lang_sub);
     items.push(&sep);
     items.push(&sed_sub);             // 提醒与数据
+    items.push(&dnd_follow);          // 跟随系统勿扰（静默久坐提醒）
     items.push(&refresh_sub);
     items.push(&sep);
     items.push(&setup_wizard_item);   // 配置
@@ -721,6 +728,7 @@ fn build_main_menu(app: &AppHandle, s: &Settings) -> tauri::menu::Menu<tauri::Wr
             sed_30, sed_40, sed_45, sed_60, sed_90,
             visible: toggle_visible,
             autostart,
+            dnd_follow,
             char_qiuqiu, char_nimbo, char_twinkle, char_claw, char_random,
         });
     }
@@ -2369,7 +2377,12 @@ fn main() {
                                 sh.set("autostart", !cur); s_changed = true;
                                 if let Some(ref it) = *items_state.0.lock().unwrap() { let _ = it.autostart.set_checked(!cur); }
                             }
-                            // 勿扰不再提供开关：始终跟随系统专注模式（menu_strings 里已移除该项）
+                            // ── 跟随系统勿扰（专注模式时静默久坐提醒）──
+                            "dnd_follow" => {
+                                let cur = sh.0.lock().unwrap().dnd_follow;
+                                sh.set("dnd_follow", !cur); s_changed = true;
+                                if let Some(ref it) = *items_state.0.lock().unwrap() { let _ = it.dnd_follow.set_checked(!cur); }
+                            }
                             // ── 显示/隐藏小组件 ──
                             "toggle_visible" => {
                                 let cur = sh.0.lock().unwrap().widget_visible;
