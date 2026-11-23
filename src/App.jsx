@@ -4,7 +4,7 @@
 // 改为 React 组件 + Tauri IPC。情绪球 JS 内联进 iframe（无 HTTP 服务）。
 // 新增：多语言 / 明暗主题 / 设置面板 / 拖拽定位 / 勿扰抑制 / 大模型底部提示。
 // ─────────────────────────────────────────────────────────────────────────────
-import React, { useEffect, useRef, useState, useCallback } from "react";
+import React, { useEffect, useMemo, useRef, useState, useCallback } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { t as T, setLang, getLang, LANGS } from "./i18n.js";
@@ -44,10 +44,26 @@ const MM_LIBS = [mmGeometry, mmRender, mmFeatures, mmFx, mmEmotions, mmEngine]
   .map((s) => s.replace(/<\/script>/gi, "<\\/script>"))
   .join("</script>\n<script>");
 
-// 把健康派生表情 id 映射成 claw 的状态 SVG（仅做粗略情绪分流）
+// ── 自动换表情 ───────────────────────────────────────────────────────────────
+// 每 5 秒自己换一个表情。原先只有球球有 4.5s 定时器（久坐时还不启动），云宝/亮亮/claw
+// 全程静止；且闲置 60s→待机、180s→睡眠后卡死不再变（「垂头丧气」就是这么来的）。
+// 现统一走引擎自带的 startTour —— 它会置 _touring，让 idle 降级整段跳过，所以不会再趴下。
+const ROTATE_MS = 5000;
+
+// 活动池：有活力 / 中性 / 正向，刻意避开 00-09 生命周期（睡眠/休眠）与错误类
+const EASE_IDS = ["10", "19", "03", "13", "14", "16", "30", "11", "20", "33", "31", "35", "36", "04", "02", "18"];
+// 久坐池：生气 · 失落 · 疲惫 · 无奈（愤怒 + 低情绪）
+const SED_IDS = ["21", "12", "15", "18"];
+
+// claw 版安全池（从 148 个 clawd-* 里挑出来的，排除 HTTP 状态码 / 节日 / error / 低电量）
+const EASE_SLUGS = ["clawd-happy", "clawd-smile", "clawd-laughing", "clawd-cool", "clawd-hopeful", "clawd-love", "clawd-celebrating", "clawd-waving", "clawd-music", "clawd-coffee", "clawd-dancing", "clawd-reading", "clawd-idea", "clawd-star", "clawd-rainbow", "clawd-peeking", "clawd-singing", "clawd-flexing"];
+const SED_SLUGS = ["clawd-angry", "clawd-grumpy", "clawd-sad", "clawd-yawning", "clawd-shrug", "clawd-facepalm"];
+// 睡眠态不轮换（免得凌晨三点还在笑）
+const SLEEP_SLUGS = ["clawd-sleeping"];
+
 // 把健康派生表情 id 映射成 clawd-pet 的某个状态 slug（仅做粗略情绪分流）
 function clawSlugFor(eid, sed) {
-  if (sed) return "clawd-meditating";
+  if (sed) return "clawd-angry"; // 久坐 → 生气（随后在 SED_SLUGS 池内轮换）
   if (eid === "00") return "clawd-sleeping";
   if (eid === "33" || eid === "10") return "clawd-celebrating";
   if (eid === "19" || eid === "03" || eid === "13") return "clawd-happy";
@@ -60,12 +76,44 @@ function clawSlugFor(eid, sed) {
 
 // 按当前角色生成 iframe 文档（完全离线自包含，无 HTTP 服务）
 function buildWidgetDoc(character, eid, sed) {
+  // 省电休眠闸门：当 Mac 锁屏、小组件隐藏或收到父窗口 {type:'hd-power', paused:true} 时，
+  // 挂起 requestAnimationFrame 与巡演定时器，使后台 CPU/GPU 占用降为 0.0%。
+  const POWER_GATE =
+    "(function(){" +
+      "var _raf=window.requestAnimationFrame.bind(window);" +
+      "var _q=[];window.__hdPaused=false;" +
+      "window.requestAnimationFrame=function(cb){" +
+        "if(window.__hdPaused||document.hidden){if(_q.length<8)_q.push(cb);return 0;}" +
+        "return _raf(cb);" +
+      "};" +
+      "function setPaused(p){" +
+        "var next=!!p;if(window.__hdPaused===next)return;window.__hdPaused=next;" +
+        "if(!next){var q=_q.splice(0,_q.length);for(var i=0;i<q.length;i++)_raf(q[i]);}" +
+      "}" +
+      "window.addEventListener('message',function(e){if(e&&e.data&&e.data.type==='hd-power')setPaused(e.data.paused);});" +
+      "document.addEventListener('visibilitychange',function(){setPaused(document.hidden);});" +
+    "})();";
+
   const HEAD = "<!doctype html><html><head><meta charset='utf-8'>" +
     "<style>html,body{margin:0;padding:0;background:transparent;overflow:hidden;width:100%;height:100%;-webkit-user-select:none;user-select:none}" +
     "#bot{width:100%;height:100%;display:flex;align-items:center;justify-content:center}#bot svg{display:block;width:100%;height:100%}</style></head><body><div id='bot'></div>" +
-    "<script>document.addEventListener('contextmenu',function(e){e.preventDefault();});document.addEventListener('selectstart',function(e){e.preventDefault();});document.addEventListener('click',function(){try{if(window.__cycleEmotion)window.__cycleEmotion();}catch(e){}});</script>";
+    "<script>" + POWER_GATE + "document.addEventListener('contextmenu',function(e){e.preventDefault();});document.addEventListener('selectstart',function(e){e.preventDefault();});document.addEventListener('click',function(){try{if(window.__cycleEmotion)window.__cycleEmotion();}catch(e){}});</script>";
   const esc = (s) => s.replace(/<\/script>/gi, "<\\/script>");
   const SED = sed ? "true" : "false";
+  const ROT = String(ROTATE_MS);
+
+  // 引擎角色（球球 / 云宝 / 亮亮）共用的自动换表情脚本：
+  // 先显示健康数据派生的 base 表情（尊重数据），随后每 ROT 毫秒在池内轮换；
+  // 点击立即换一个并重新计时；睡眠态（00）不轮换，保持睡着。
+  const ENGINE_ROT =
+    "var EASE_IDS=" + JSON.stringify(EASE_IDS) + ",SED_IDS=" + JSON.stringify(SED_IDS) + ";" +
+    "var base='" + eid + "';var pool=" + SED + "?SED_IDS:EASE_IDS;" +
+    "var arr=[base].concat(pool.filter(function(x){return x!==base;}));" +
+    "window.__cycleEmotion=function(){" +
+      "var n;do{n=pool[Math.floor(Math.random()*pool.length)];}while(n===base&&pool.length>1);base=n;" +
+      "try{window.__char.startTour([n].concat(pool.filter(function(x){return x!==n;}))," + ROT + ");}" +
+      "catch(e){try{window.__char.setEmotion(n);}catch(e2){}}};" +
+    "if(base!=='00'){try{window.__char.startTour(arr," + ROT + ");}catch(e){}}";
 
   if (character === "nimbo" || character === "twinkle") {
     const charId = character === "nimbo" ? "nimbo" : "twinkle";
@@ -76,8 +124,7 @@ function buildWidgetDoc(character, eid, sed) {
       "<script>(function(){try{" +
         "var m=MoodMates.create(document.getElementById('bot'),{character:'" + charId + "',emotion:'" + eid + "',idle:true,eyeScale:1.5});" +
         "window.__char=m;window.__charReady=true;" +
-        "var ids=['10','19','03','13','33','30','11','18','02','15','12','04','20','35','36','31'];var ai=0;" +
-        "window.__cycleEmotion=function(){var arr=" + SED + "?['21','34']:ids;var n;do{n=Math.floor(Math.random()*arr.length);}while(n===ai&&arr.length>1);ai=n;try{m.setEmotion(arr[ai]);}catch(e){}};" +
+        ENGINE_ROT +
       "}catch(e){document.title='ERR:'+(e.message||e).slice(0,80)}})()</script>" +
       "</body></html>";
   }
@@ -91,10 +138,18 @@ function buildWidgetDoc(character, eid, sed) {
       "<script>(function(){try{" +
         "var svgs=" + json + ";var order=" + order + ";var el=document.getElementById('bot');" +
         "function show(k){try{el.innerHTML=svgs[k]||svgs[order[0]];}catch(e){}}" +
-        "show(" + JSON.stringify(st) + ");" +
+        "var base=" + JSON.stringify(st) + ";show(base);" +
         "window.__char={setGaze:function(){},clearGaze:function(){}};window.__charReady=true;" +
-        "var ki=order.indexOf(" + JSON.stringify(st) + ");if(ki<0)ki=0;" +
-        "window.__cycleEmotion=function(){var n;do{n=Math.floor(Math.random()*order.length);}while(n===ki&&order.length>1);ki=n;show(order[ki]);};" +
+        // 只在安全池内轮换（原先是从全部 148 个里随机 → 会抽到 clawd-404 / 500 / 圣诞装）；
+        // 顺序巡演 + base 回归，行为与引擎角色的 startTour 对齐
+        "var pool=" + SED + "?" + JSON.stringify(SED_SLUGS) + ":" + JSON.stringify(EASE_SLUGS) + ";" +
+        "var arr=[base].concat(pool.filter(function(x){return x!==base;}));" +
+        "var asleep=" + JSON.stringify(SLEEP_SLUGS) + ".indexOf(base)>=0;var t=0,ai=0;" +
+        "function tick(){ai=(ai+1)%arr.length;base=arr[ai];show(base);}" +
+        "window.__cycleEmotion=function(){var n;do{n=pool[Math.floor(Math.random()*pool.length)];}while(n===base&&pool.length>1);" +
+          "base=n;arr=[n].concat(pool.filter(function(x){return x!==n;}));ai=0;show(n);" +
+          "if(t)clearInterval(t);t=setInterval(tick," + ROT + ");};" +
+        "if(!asleep){t=setInterval(tick," + ROT + ");}" +
       "}catch(e){document.title='ERR:'+(e.message||e).slice(0,80)}})()</script>" +
       "</body></html>";
   }
@@ -106,11 +161,7 @@ function buildWidgetDoc(character, eid, sed) {
       "var b=EmotionBall.create(document.getElementById('bot')," +
       "{emotion:'" + eid + "',shape:'blob',eyeScale:1.7,idle:true,lite:true,autostart:true});" +
       "window.__char=b;window.__charReady=true;" +
-      "var SED=" + SED + ";" +
-      "var ac=['10','19','03','13','14','16','30','11','18','33','02','15','12','04','20','35','36','31','39','40'];" +
-      "var ai=0;" +
-      "window.__cycleEmotion=function(){var arr=SED?['21','34']:ac;var n;do{n=Math.floor(Math.random()*arr.length);}while(n===ai&&arr.length>1);ai=n;b.setEmotion(arr[ai]);};" +
-      "if(!SED){window.__autoTimer=setInterval(window.__cycleEmotion,4500);}" +
+      ENGINE_ROT +
     "}catch(e){document.title='ERR:'+(e.message||e).slice(0,80)}})()</script>" +
     "</body></html>";
 }
@@ -342,20 +393,24 @@ function fmtSleep(min) {
   return Math.floor(min / 60) + "h" + (min % 60 ? (min % 60) + "m" : "");
 }
 
-function computeBallEmotion(t, sedOverride) {
+function computeBallEmotion(t, sedOverride, stepGoal) {
   if (!t) return "02";
   const isSed = sedOverride !== undefined ? sedOverride : t.sedentary;
-  if (isSed) return Math.random() < 0.5 ? "21" : "34";
+  // 久坐 → 生气。这里必须返回确定值：每次 render 随机会让 srcDoc 字符串变化，
+  // 父组件轮询时若重建 iframe，里面的轮换定时器会被清零。
+  if (isSed) return "21";
   const tip = t.tip_level;
   const sleep = t.sleep_asleep_min || 0;
   const steps = t.steps || 0;
+  const liveHr = t.heart_rate || 0;
+  const goal = stepGoal || 8000;
   const hr = new Date().getHours();
-  if (tip === "alert") return "17";
+  if (tip === "alert" || liveHr >= 115) return "17";
   if (tip === "warn") return sleep < 300 ? "15" : "11";
   if (hr >= 23 || hr < 6) return "00";
   if (sleep > 0 && sleep < 240) return "00";
   if (sleep > 0 && sleep < 360) return "15";
-  if (steps > 10000) return "10";
+  if (steps >= goal) return "33";
   if (steps > 0 && steps < 2000) return "12";
   return "19";
 }
@@ -509,12 +564,12 @@ function SettingsPanel({ draft, setDraft, onSave, onCancel, busy, rerender, syst
         </div>
       </div>
 
-      {/* ── 久坐提醒（置顶高亮卡片：自定义阈值）── */}
+      {/* ── 久坐提醒（置顶高亮卡片：自定义阈值 + 提醒时段）── */}
       <div style={sedCard}>
         <div style={{ fontSize: 11, fontWeight: 700, color: C.amber, marginBottom: 7 }}>
           {ICO.chair}{" 久坐提醒"}
         </div>
-        <label style={sedLabel}>{T("sedentaryThreshold")}</label>
+        <label style={sedLabel}>{T("sedThreshold")}</label>
         <div style={{ display: "flex", gap: 5, flexWrap: "wrap" }}>
           {[30, 40, 45, 60, 90].map((m) => (
             <div key={m} onClick={() => set("sedentary_min", m)}
@@ -525,6 +580,38 @@ function SettingsPanel({ draft, setDraft, onSave, onCancel, busy, rerender, syst
             </div>
           ))}
         </div>
+        <label style={sedLabel}>{T("notifyWindow")}</label>
+        <div style={{ display: "flex", gap: 5, flexWrap: "wrap", marginTop: 2 }}>
+          {[[10, 19, "10:00–19:00"], [9, 22, "09:00–22:00"], [8, 23, "08:00–23:00"]].map(([sh, eh, lbl]) => {
+            const curS = draft.notify_start_hour != null ? draft.notify_start_hour : 9;
+            const curE = draft.notify_end_hour != null ? draft.notify_end_hour : 22;
+            const active = curS === sh && curE === eh;
+            return (
+              <div key={lbl} onClick={() => { set("notify_start_hour", sh); set("notify_end_hour", eh); }}
+                style={{ flex: 1, textAlign: "center", fontSize: 9.5, fontWeight: 600, padding: "4px 0", borderRadius: 8, cursor: "pointer",
+                  background: active ? C.amber : "rgba(128,128,128,0.14)",
+                  color: active ? "#fff" : C.second }}>
+                {lbl}
+              </div>
+            );
+          })}
+        </div>
+      </div>
+
+      {/* ── 每日步数目标 ── */}
+      <label style={labelStyle}>{T("stepGoal")}</label>
+      <div style={{ display: "flex", gap: 5, flexWrap: "wrap", marginTop: 3 }}>
+        {[6000, 8000, 10000, 12000].map((g) => {
+          const active = (draft.step_goal || 8000) === g;
+          return (
+            <div key={g} onClick={() => set("step_goal", g)}
+              style={{ flex: 1, textAlign: "center", fontSize: 10, fontWeight: 600, padding: "4px 0", borderRadius: 8, cursor: "pointer",
+                background: active ? C.green : "rgba(128,128,128,0.14)",
+                color: active ? "#fff" : C.second }}>
+              {g.toLocaleString()}
+            </div>
+          );
+        })}
       </div>
 
       {/* ── 跟随系统勿扰开关 ── */}
@@ -562,7 +649,7 @@ function SettingsPanel({ draft, setDraft, onSave, onCancel, busy, rerender, syst
           <div key={v} onClick={() => {
             set("theme", v);
             const dark = v === "dark" ? true : v === "light" ? false : systemDark;
-            C = pickPalette(settingsRef.current.style, dark);
+            C = pickPalette(draft.style, dark);
             rerender();
           }}
             style={{ flex: 1, textAlign: "center", fontSize: 10, fontWeight: 600, padding: "5px 0", borderRadius: 8, cursor: "pointer",
@@ -642,7 +729,8 @@ function SettingsPanel({ draft, setDraft, onSave, onCancel, busy, rerender, syst
   </div >
 );
 }
-function Widget({ data, settings, appIdentity, character, onRefresh, onReset, justResetAt, sedPopRef, dndActive, bottomTip, forceWidgetPop, setForceWidgetPop }) {
+function Widget({ data, settings, appIdentity, character, onRefresh, onReset, onCycleTip, justResetAt, sedPopRef, dndActive, bottomTip, forceWidgetPop, setForceWidgetPop, powerPaused }) {
+  const [showTrend, setShowTrend] = useState(false);
   const styleId = settings && settings.style;
   const brutal = isBrutal(styleId);
   const term = isTerm(styleId);
@@ -660,61 +748,113 @@ function Widget({ data, settings, appIdentity, character, onRefresh, onReset, ju
   const calories = t.calories;
   const sleep = t.sleep_asleep_min || 0;
   const updated = t.updated_at;
+  const lastSyncTime = t.last_sync_time || updated;
+  const syncAgeMin = t.sync_age_min;
+  const syncStale = !!t.sync_stale;
+  const deviceName = t.device_name || "Fitbit";
+  const deviceBattery = t.device_battery != null ? Number(t.device_battery) : null;
+  const deviceBatteryStatus = t.device_battery_status || "";
   const sedentary = !!t.sedentary;
   const idleMin = t.idle_min != null ? t.idle_min : null;
+  const stepGoal = (settings && settings.step_goal) ? Number(settings.step_goal) : 8000;
 
   const now = new Date();
 
   const justReset = (Date.now() - justResetAt) < 90000;
   const effSed = justReset ? false : sedentary;
   const effIdle = justReset ? 0 : idleMin;
-  const eid = computeBallEmotion(t, effSed);
+  const eid = computeBallEmotion(t, effSed, stepGoal);
 
-  const ballDoc = buildWidgetDoc(character, eid, effSed);
+  // memo：buildWidgetDoc 内含 148 个 SVG 的 JSON.stringify，且字符串一旦变化 iframe 就会
+  // 整个重载（内部轮换定时器归零）。eid 已改成确定值，这里再兜一层。
+  const ballDoc = useMemo(() => buildWidgetDoc(character, eid, effSed), [character, eid, effSed]);
+
+  const ballIframeRef = useRef(null);
+  const latestSettingsRef = useRef(settings);
+  latestSettingsRef.current = settings;
+  const powerPausedRef = useRef(powerPaused);
+  powerPausedRef.current = powerPaused;
+
+  // 锁屏 / 隐藏时向萌宠 iframe 发送休眠指令，唤醒时恢复动画
+  useEffect(() => {
+    try {
+      const el = ballIframeRef.current;
+      const w = el && el.contentWindow;
+      if (w) w.postMessage({ type: "hd-power", paused: !!powerPaused }, "*");
+    } catch (e) {}
+  }, [powerPaused, ballDoc]);
+
+  // 父窗口级的「眼睛跟随鼠标」gaze（带 Mac 省电优化）：
+  // 1) 30fps 时间戳节流（避免高回报率鼠标每秒触发数百次跨 iframe 调用）；
+  // 2) getBoundingClientRect 坐标缓存 2 秒（消除每次 mousemove 的同步布局重排）；
+  // 3) 鼠标距离萌宠超过 320px 时自动进入距离休眠态（clearGaze 后零开销直接跳过）。
+  useEffect(() => {
+    const clampN = (v, a, b) => (v < a ? a : (v > b ? b : v));
+    let lastTick = 0;
+    let cachedCenter = null;
+    let cachedAt = 0;
+    let gazeIdle = true;
+
+    const onMove = (e) => {
+      if (powerPausedRef.current || document.hidden) return;
+      const nowMs = performance.now();
+      if (nowMs - lastTick < 33) return; // 30fps 节流
+      lastTick = nowMs;
+      try {
+        const el = ballIframeRef.current;
+        const w = el && el.contentWindow;
+        if (!w || !w.__char) return;
+        if (!cachedCenter || nowMs - cachedAt > 2000) {
+          const rect = el.getBoundingClientRect();
+          cachedCenter = { x: rect.left + rect.width / 2, y: rect.top + rect.height / 2 };
+          cachedAt = nowMs;
+        }
+        const dx = e.clientX - cachedCenter.x;
+        const dy = e.clientY - cachedCenter.y;
+        const distSq = dx * dx + dy * dy;
+        // 距离超过 320px：进入静息态，不再高频跨 iframe 调用
+        if (distSq > 320 * 320) {
+          if (!gazeIdle) {
+            gazeIdle = true;
+            w.__char.clearGaze();
+          }
+          return;
+        }
+        gazeIdle = false;
+        const s = latestSettingsRef.current;
+        const R = (s && s.gaze_radius) ? s.gaze_radius : 80;
+        const TH = (s && s.gaze_threshold) ? s.gaze_threshold : 1.0;
+        let nx = clampN(dx / R, -1, 1);
+        let ny = clampN(dy / R, -1, 1);
+        nx = clampN(nx, -TH, TH);
+        ny = clampN(ny, -TH, TH);
+        w.__char.setGaze(nx, ny);
+      } catch (err) {}
+    };
+    const onLeave = () => {
+      try {
+        gazeIdle = true;
+        const el = ballIframeRef.current;
+        const w = el && el.contentWindow;
+        if (w && w.__char) w.__char.clearGaze();
+      } catch (err) {}
+    };
+    window.addEventListener("mousemove", onMove, { passive: true });
+    document.addEventListener("mouseleave", onLeave);
+    window.addEventListener("blur", onLeave);
+    return () => {
+      window.removeEventListener("mousemove", onMove);
+      document.removeEventListener("mouseleave", onLeave);
+      window.removeEventListener("blur", onLeave);
+    };
+  }, []);
 
   const ballIframe = (
     <iframe
+      ref={ballIframeRef}
       srcDoc={ballDoc}
       style={{ width: 52, height: 52, border: "none", background: "transparent", display: "block", flexShrink: 0, borderRadius: "50%", cursor: "pointer", overflow: "hidden" }}
       title="mood-ball"
-      ref={function (el) {
-        if (!el) return;
-        if (el.__ballWired) return;
-        el.__ballWired = true;
-        let tries = 0;
-        const setup = function () {
-          const cw = el.contentWindow;
-          if (!cw || !cw.__charReady) { if (tries++ < 50) setTimeout(setup, 100); return; }
-          try {
-            // 点击换表情的监听已内置到 iframe 文档内（每个新文档自带，srcDoc 重载后不丢失）；
-            // 这里只处理父窗口级的「眼睛跟随鼠标」gaze，且每次都重新取 el.contentWindow，
-            // 避免 srcDoc 重载后 contentWindow 变成已失效的旧窗口引用。
-            const clampN = function (v, a, b) { return v < a ? a : (v > b ? b : v); };
-            const onMove = function (e) {
-              try {
-                const w = el.contentWindow;
-                if (!w || !w.__char) return;
-                const s = settings;
-                const R = (s && s.gaze_radius) ? s.gaze_radius : 80;
-                const TH = (s && s.gaze_threshold) ? s.gaze_threshold : 1.0;
-                const rect = el.getBoundingClientRect();
-                const cx = rect.left + rect.width / 2;
-                const cy = rect.top + rect.height / 2;
-                let nx = clampN((e.clientX - cx) / R, -1, 1);
-                let ny = clampN((e.clientY - cy) / R, -1, 1);
-                nx = clampN(nx, -TH, TH);
-                ny = clampN(ny, -TH, TH);
-                w.__char.setGaze(nx, ny);
-              } catch (err) {}
-            };
-            const onLeave = function () { try { const w = el.contentWindow; if (w && w.__char) w.__char.clearGaze(); } catch (err) {} };
-            window.addEventListener("mousemove", onMove);
-            document.addEventListener("mouseleave", onLeave);
-            window.addEventListener("blur", onLeave);
-          } catch (e) {}
-        };
-        setup();
-      }}
     />
   );
 
@@ -784,9 +924,14 @@ function Widget({ data, settings, appIdentity, character, onRefresh, onReset, ju
     };
   })();
 
+  const microPool = T("microHabits");
+  const standHintText = Array.isArray(microPool) && microPool.length
+    ? microPool[(effIdle || 0) % microPool.length]
+    : T("standHint");
+
   const idleChipWithPop = effIdle != null ? (
     <div style={{ position: "relative" }}>
-      <div data-tauri-drag-region="false" title={T("sedentaryThreshold")} onMouseDown={function (e) { e.preventDefault(); e.stopPropagation(); if (!effSed || !sedPopRef.current) return; const vis = sedPopRef.current.style.display !== "none"; sedPopRef.current.style.display = vis ? "none" : "block"; if (vis) dismissSedPop(); else { try { localStorage.removeItem(SED_POP_KEY); } catch (err) {} } }} style={{ display: "flex", alignItems: "center", gap: 5, height: 19, padding: "0 8px 0 6px", borderRadius: brutal ? 0 : term ? 3 : 99, flexShrink: 0, fontSize: 9, fontWeight: 600, letterSpacing: 0.2, fontVariantNumeric: "tabular-nums", cursor: effSed ? "pointer" : "default", ...(effSed ? { background: "rgba(255,159,10,0.16)", color: C.amber, animation: "sed-pulse 2.2s ease-in-out infinite" } : { background: C.card, color: C.third }) }}>
+      <div data-tauri-drag-region="false" title={T("sedThreshold")} onMouseDown={function (e) { e.preventDefault(); e.stopPropagation(); if (!effSed || !sedPopRef.current) return; const vis = sedPopRef.current.style.display !== "none"; sedPopRef.current.style.display = vis ? "none" : "block"; if (vis) dismissSedPop(); else { try { localStorage.removeItem(SED_POP_KEY); } catch (err) {} } }} style={{ display: "flex", alignItems: "center", gap: 5, height: 19, padding: "0 8px 0 6px", borderRadius: brutal ? 0 : term ? 3 : 99, flexShrink: 0, fontSize: 9, fontWeight: 600, letterSpacing: 0.2, fontVariantNumeric: "tabular-nums", cursor: effSed ? "pointer" : "default", ...(effSed ? { background: "rgba(255,159,10,0.16)", color: C.amber, animation: "sed-pulse 2.2s ease-in-out infinite" } : { background: C.card, color: C.third }) }}>
         {ICO.chair}<span>{effIdle} min</span>
       </div>
       {effSed && effIdle != null && (
@@ -796,13 +941,48 @@ function Widget({ data, settings, appIdentity, character, onRefresh, onReset, ju
             {term ? "[!]" : null}
             {ICO.chair}<span>{T("sedentaryMin", { m: idleMin })}</span>
           </div>
-          <div style={sedS.h}>{T("standHint")}</div>
+          <div style={sedS.h}>{standHintText}</div>
           <div style={{ display: "flex", gap: 6, marginTop: 7 }}>
             <div onMouseDown={function (e) { e.stopPropagation(); if (sedPopRef.current) sedPopRef.current.style.display = "none"; dismissSedPop(); try { invoke("snooze_sedentary", { minutes: 30 }); invoke("hide_sed_popover"); } catch (e) {} }} style={sedS.l}>{T("later")}</div>
             <div onMouseDown={function (e) { e.stopPropagation(); if (sedPopRef.current) sedPopRef.current.style.display = "none"; dismissSedPop(); try { onReset(); invoke("hide_sed_popover"); } catch (e) {} }} style={sedS.o}>{T("stoodUp")}</div>
           </div>
         </div>
       )}
+    </div>
+  ) : null;
+
+  // 手环电量胶囊（与久坐胶囊同高 19px，横排并列在久坐胶囊旁边）
+  const isBatLow = deviceBattery != null && (deviceBattery <= 25 || deviceBatteryStatus === "Low" || deviceBatteryStatus === "Empty");
+  const batColor = deviceBattery == null ? C.third : isBatLow ? C.amber : deviceBattery <= 50 ? C.second : C.green;
+  const batFillW = deviceBattery != null ? Math.max(1.2, Math.min(8.4, (deviceBattery / 100) * 8.4)) : 0;
+  const batteryChip = deviceBattery != null ? (
+    <div
+      data-tauri-drag-region="false"
+      title={`${deviceName} · ${deviceBattery}%${deviceBatteryStatus ? " (" + deviceBatteryStatus + ")" : ""}`}
+      style={{
+        display: "flex",
+        alignItems: "center",
+        gap: 4,
+        height: 19,
+        padding: "0 7px 0 6px",
+        borderRadius: brutal ? 0 : term ? 3 : 99,
+        flexShrink: 0,
+        fontSize: 9,
+        fontWeight: 600,
+        letterSpacing: 0.1,
+        fontVariantNumeric: "tabular-nums",
+        cursor: "default",
+        ...(isBatLow
+          ? { background: "rgba(255,159,10,0.16)", color: C.amber }
+          : { background: C.card, color: C.third }),
+      }}
+    >
+      <svg width="13" height="9" viewBox="0 0 14 9" fill="none" style={{ display: "block", flexShrink: 0 }}>
+        <rect x="0.7" y="1" width="10.6" height="7" rx="1.6" stroke="currentColor" strokeWidth="1.2" />
+        <path d="M12.3 3.1v2.8" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" />
+        <rect x="1.8" y="2.1" width={batFillW} height="4.8" rx="0.8" fill={batColor} />
+      </svg>
+      <span>{deviceBattery}%</span>
     </div>
   ) : null;
 
@@ -817,16 +997,38 @@ function Widget({ data, settings, appIdentity, character, onRefresh, onReset, ju
           getCurrentWindow().startDragging().catch(function () {});
         }
       }}
-      style={{ display: "flex", alignItems: "center", gap: 9, padding: "0 2px", cursor: "grab" }}
+      style={{ display: "flex", alignItems: "center", gap: 6, padding: "0 2px", cursor: "grab" }}
     >
       {appIdentity && appIdentity.icon ? (
-        <img src={appIdentity.icon} width="18" height="18" style={{ display: "block", flexShrink: 0, borderRadius: brutal ? 0 : term ? 3 : 4, objectFit: "cover" }} alt="" />
+        <img src={appIdentity.icon} width="20" height="20" style={{ display: "block", flexShrink: 0, borderRadius: brutal ? 0 : term ? 3 : 5, objectFit: "cover", boxShadow: brutal || term ? "none" : "0 1px 3px rgba(0,0,0,0.22)" }} alt="" />
       ) : (
-        <svg width="18" height="18" viewBox="0 0 18 18" style={{ display: "block", flexShrink: 0 }}>
-          <g transform="translate(9,9) rotate(-90)" fill="none" strokeLinecap="round">
-            <circle r="7.3" stroke="#FF375F" strokeWidth="1.7" strokeDasharray="45.87" strokeDashoffset="5.5" />
-            <circle r="5.0" stroke="#30D158" strokeWidth="1.7" strokeDasharray="31.42" strokeDashoffset="4.2" />
-            <circle r="2.8" stroke="#0A84FF" strokeWidth="1.7" strokeDasharray="17.59" strokeDashoffset="2.8" />
+        <svg width="20" height="20" viewBox="0 0 24 24" style={{ display: "block", flexShrink: 0 }}>
+          <defs>
+            <linearGradient id="hd-bg" x1="0" y1="0" x2="1" y2="1">
+              <stop offset="0%" stopColor="#1D2642" />
+              <stop offset="100%" stopColor="#0A0D18" />
+            </linearGradient>
+            <linearGradient id="hd-r1" x1="0" y1="0" x2="1" y2="1">
+              <stop offset="0%" stopColor="#FF2D69" />
+              <stop offset="100%" stopColor="#FF8C42" />
+            </linearGradient>
+            <linearGradient id="hd-r2" x1="0" y1="0" x2="1" y2="1">
+              <stop offset="0%" stopColor="#20D670" />
+              <stop offset="100%" stopColor="#86F866" />
+            </linearGradient>
+            <linearGradient id="hd-r3" x1="0" y1="0" x2="1" y2="1">
+              <stop offset="0%" stopColor="#0A84FF" />
+              <stop offset="100%" stopColor="#56E2FF" />
+            </linearGradient>
+          </defs>
+          <rect x="1" y="1" width="22" height="22" rx={brutal || isPixel(styleId) ? "0" : term ? "3" : "6"} fill="url(#hd-bg)" stroke="rgba(255,255,255,0.28)" strokeWidth="0.8" />
+          <g transform="translate(12,12) rotate(-90)" fill="none" strokeLinecap="round">
+            <circle r="7.6" stroke="rgba(255,55,95,0.18)" strokeWidth="1.9" />
+            <circle r="5.1" stroke="rgba(48,209,88,0.18)" strokeWidth="1.9" />
+            <circle r="2.6" stroke="rgba(10,132,255,0.18)" strokeWidth="1.9" />
+            <circle r="7.6" stroke="url(#hd-r1)" strokeWidth="1.9" strokeDasharray="47.75" strokeDashoffset="8.5" />
+            <circle r="5.1" stroke="url(#hd-r2)" strokeWidth="1.9" strokeDasharray="32.04" strokeDashoffset="7.2" />
+            <circle r="2.6" stroke="url(#hd-r3)" strokeWidth="1.9" strokeDasharray="16.34" strokeDashoffset="4.5" />
           </g>
         </svg>
       )}
@@ -837,9 +1039,29 @@ function Widget({ data, settings, appIdentity, character, onRefresh, onReset, ju
       <div style={{ flex: 1 }} />
       {ballWrap}
       {idleChipWithPop}
-      <span style={{ fontSize: 9, fontWeight: 500, color: C.third, fontVariantNumeric: "tabular-nums" }}>{updated || fmtTime(now)}</span>
+      {batteryChip}
+      <span
+        title={
+          syncStale
+            ? T("staleSyncTip", { dev: deviceName, m: syncAgeMin != null ? syncAgeMin : "120+" })
+            : T("lastSyncTip", { dev: deviceName, t: lastSyncTime || fmtTime(now) })
+        }
+        style={{
+          fontSize: 9,
+          fontWeight: syncStale ? 700 : 500,
+          color: syncStale ? C.amber : C.third,
+          fontVariantNumeric: "tabular-nums",
+          display: "inline-flex",
+          alignItems: "center",
+          gap: 3,
+          cursor: "default",
+        }}
+      >
+        {syncStale && <span style={{ width: 5, height: 5, borderRadius: "50%", background: C.amber, display: "inline-block" }} />}
+        {lastSyncTime || fmtTime(now)}
+      </span>
       {/* 设置入口已移至菜单栏 */}
-      <div data-tauri-drag-region="false" className="hd-refresh-btn" onMouseDown={function (e) { e.preventDefault(); e.stopPropagation(); if (e.button !== 0) return; onRefresh(); }} title={T("refreshTitle")} style={{ width: 19, height: 19, borderRadius: brutal ? 0 : term ? 3 : "50%", background: brutal ? C.glassCtl : term ? "transparent" : "rgba(255,255,255,0.08)", border: brutal ? "2px solid " + C.hairline : term ? "1px solid " + C.hairline : "none", display: "flex", alignItems: "center", justifyContent: "center", cursor: "pointer", flexShrink: 0, color: C.second }}>
+      <div data-tauri-drag-region="false" className="hd-refresh-btn" onMouseDown={function (e) { e.preventDefault(); e.stopPropagation(); if (e.button !== 0) return; onRefresh(); }} title={T("refreshTitle")} style={{ width: 20, height: 20, borderRadius: brutal ? 0 : term ? 3 : "50%", background: brutal ? C.glassCtl : term ? "transparent" : C.glassCtl, border: brutal ? "2px solid " + C.hairline : term ? "1px solid " + C.hairline : "none", boxShadow: brutal || term || isPixel(styleId) ? "none" : "inset 0 0.5px 0 " + C.rim, display: "flex", alignItems: "center", justifyContent: "center", cursor: "pointer", flexShrink: 0, color: C.second }}>
         {ICO.refresh}
       </div>
     </div>
@@ -878,24 +1100,42 @@ function Widget({ data, settings, appIdentity, character, onRefresh, onReset, ju
     }
     return {
       width: "100%", height: "100%", boxSizing: "border-box", padding: "12px 14px",
-      // 圆角统一 36px：与系统 NSVisualEffectView 的 setCornerRadius(36) 完全一致，
-      // 四角边界对齐，磨砂层与内容容器不露边（之前超椭圆 clipPath 与系统正圆角不重合）
+      // 圆角统一 36px：与系统 NSVisualEffectView / NSGlassEffectView 的 setCornerRadius(36) 完全一致
       borderRadius: "36px",
       display: "flex", flexDirection: "column",
-      // 玻璃模糊由系统 NSVisualEffectView 提供；前端只叠极薄 tint 透出系统玻璃。
-      // 不再叠 CSS backdrop-filter：透明 WKWebView 上 backdrop-filter 是 macOS 已知
-      // 白屏/闪烁风险（配合每 5s 重绘 + iframe 动画时尤其明显），去掉后磨砂观感不变。
-      background: C.bg,
-      // 顶部亮棱（受光）+ 底部暗收口，无四向棱线（圆角处交叠出暗角）也无外投影（透明窗口裁直角）
-      boxShadow: "inset 0 1px 0 " + C.rim + ", inset 0 -0.5px 0 rgba(0,0,0,0.16)",
+      // 玻璃模糊由系统底层提供；前端叠加左上 135° 镜面受光柔光晕（不调用 backdrop-filter，零闪烁风险）
+      background: "radial-gradient(125% 80% at 16% 0%, " + C.rimSoft + " 0%, rgba(255,255,255,0) 58%), " + C.bg,
+      // 135° 斜向液态玻璃折射内棱：左上受光顶棱 + 左侧微亮棱 + 右下背光微反光 + 底部暗收口
+      boxShadow:
+        "inset 0 1px 0 " + C.rim +
+        ", inset 1px 0 0 " + C.rimSoft +
+        ", inset -0.5px -0.5px 0 " + C.rimSoft +
+        ", inset 0 -1px 0 rgba(0,0,0,0.14)",
       overflow: "hidden", position: "relative",
     };
   })();
 
   // ── 极简数字风（唯一布局）──
   {
-    const stepGoal = 8000;
-    const stepPct = Math.min(100, Math.round((steps / stepGoal) * 100));
+    const stepPct = Math.min(100, Math.round((steps / Math.max(1, stepGoal)) * 100));
+    const goalDone = steps >= stepGoal;
+    const avg = t.rolling_averages || data.rolling_averages || {};
+    const dailySeries = useMemo(() => {
+      if (Array.isArray(t.daily_history) && t.daily_history.length > 0) return t.daily_history.slice(-7);
+      const hist = Array.isArray(data.history) ? data.history : [];
+      const map = {};
+      for (const h of hist) {
+        if (h && h.date && h.steps != null) map[h.date] = h;
+      }
+      if (t.date) map[t.date] = { ...map[t.date], ...t };
+      const dates = Object.keys(map).sort().slice(-7);
+      return dates.map((d) => ({
+        date: d,
+        steps: map[d].steps || 0,
+        sleep_asleep_min: map[d].sleep_asleep_min || 0,
+      }));
+    }, [t, data.history]);
+
     const metrics = [
       { label: hrLabel, value: hrVal, unit: T("bpm"), color: C.red },
       { label: T("hrv"), value: hrv, unit: T("ms"), color: C.blue },
@@ -911,8 +1151,6 @@ function Widget({ data, settings, appIdentity, character, onRefresh, onReset, ju
     const sleepTotal = sleepStages.reduce(function (a, p) { return a + (p.v || 0); }, 0);
     // 圆点指示提示来源：绿色 = LLM 生效（AI tip / 正在分析），蓝色 = LLM 未配置或失败、回落到本地静态提示池
     const tipDot = bottomTip ? C.green : C.blue;
-    // AI tip 优先；AI 未配置 / 请求失败时回落到本地静态池：按分钟轮换（久坐场景优先久坐提醒），
-    // 保证提示始终可见且会更新，不再依赖数据里的旧规则 tip（数据不动它就不动的根因）
     const fallbackPool = effSed ? SEDENTARY_TIPS : FALLBACK_TIPS;
     const fallbackTip = fallbackPool[Math.floor(Date.now() / 60000) % fallbackPool.length];
     const tipText = cleanTip(bottomTip) || fallbackTip;
@@ -920,46 +1158,155 @@ function Widget({ data, settings, appIdentity, character, onRefresh, onReset, ju
     const calStr = calories != null ? calories + " " + T("kcal") : "";
     const midLine = T("stepsUnit") + " · " + T("distance") + " " + distStr + (calStr ? " · " + calStr : "");
 
+    // 7 日均值差值格式化
+    const fmtDelta = (cur, avgVal, unit = "") => {
+      if (cur == null || avgVal == null || avgVal === 0) return "—";
+      const d = Math.round((cur - avgVal) * 10) / 10;
+      const sign = d > 0 ? "+" : "";
+      return `${sign}${d}${unit}`;
+    };
+
+    const maxBarSteps = Math.max(
+      stepGoal,
+      ...dailySeries.map((x) => Number(x.steps || 0))
+    );
+
     return (
       <div style={Object.assign({}, glassStyle, { display: "flex", flexDirection: "column", gap: 8 })}>
         {header}
-        <div style={{ display: "flex", alignItems: "flex-end", justifyContent: "space-between", padding: "0 4px", position: "relative" }}>
-          <div style={{ display: "flex", flexDirection: "column" }}>
-            <span style={{ fontSize: 46, fontWeight: 700, lineHeight: 1, letterSpacing: -2, color: C.label, fontVariantNumeric: "tabular-nums" }}>{steps ? steps.toLocaleString() : "—"}</span>
-            <span style={{ fontSize: 11.5, fontWeight: 500, color: C.second, marginTop: 4, letterSpacing: 0.3 }}>
-              {midLine}
-            </span>
+        {showTrend ? (
+          <div
+            className="hd-view-enter hd-click-area"
+            onClick={() => setShowTrend(false)}
+            title={T("trendHint")}
+            style={{ flex: 1, display: "flex", flexDirection: "column", justifyContent: "space-between", padding: "2px 4px", cursor: "pointer" }}
+          >
+            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+              <span style={{ fontSize: 10, fontWeight: 700, color: C.label }}>{T("trendTitle")}</span>
+              <span style={{ fontSize: 9, color: C.third }}>✕</span>
+            </div>
+            {/* 7 日步数迷你柱状图 */}
+            <div style={{ display: "flex", alignItems: "flex-end", gap: 6, height: 68, padding: "6px 4px 2px", borderBottom: "1px solid " + C.hairline }}>
+              {(dailySeries.length ? dailySeries : [{ date: t.date || "—", steps }]).map((item, idx, arr) => {
+                const sVal = Number(item.steps || 0);
+                const hPct = Math.max(8, Math.round((sVal / Math.max(1, maxBarSteps)) * 100));
+                const isToday = idx === arr.length - 1;
+                const hit = sVal >= stepGoal;
+                const barColor = isToday ? C.green : hit ? C.teal : C.third;
+                const dayLbl = (item.date || "").slice(5);
+                return (
+                  <div key={item.date || idx} style={{ flex: 1, display: "flex", flexDirection: "column", alignItems: "center", gap: 3, height: "100%", justifyContent: "flex-end" }}>
+                    <span style={{ fontSize: 7.5, color: isToday ? C.label : C.third, fontVariantNumeric: "tabular-nums" }}>
+                      {sVal >= 1000 ? (sVal / 1000).toFixed(1) + "k" : (sVal || "0")}
+                    </span>
+                    <div style={{ width: "100%", maxWidth: 22, height: `${hPct}%`, borderRadius: brutal || isPixel(styleId) ? 0 : 4, background: barColor, opacity: isToday ? 1 : 0.72, boxShadow: isToday && !brutal && !term && !isPixel(styleId) ? "0 0 8px rgba(48,209,88,0.35)" : "none" }} />
+                    <span style={{ fontSize: 7.5, color: isToday ? C.label : C.third, fontWeight: isToday ? 700 : 500, fontVariantNumeric: "tabular-nums" }}>{dayLbl}</span>
+                  </div>
+                );
+              })}
+            </div>
+            {/* 今日 vs 7日均值 4格对比 */}
+            <div style={{ display: "flex", padding: "4px 0" }}>
+              {[
+                { label: T("stepsUnit"), cur: steps, delta: fmtDelta(steps, avg.steps ? Math.round(avg.steps) : null), color: C.green },
+                { label: T("sleep"), cur: fmtSleep(sleep) || "—", delta: fmtDelta(sleep, avg.sleep_asleep_min ? Math.round(avg.sleep_asleep_min) : null, "m"), color: C.indigo },
+                { label: hrLabel, cur: resting != null ? resting : "—", delta: fmtDelta(resting, avg.resting_hr), color: C.red },
+                { label: T("hrv"), cur: hrv != null ? hrv : "—", delta: fmtDelta(hrv, avg.hrv), color: C.blue },
+              ].map((m, i) => (
+                <div key={i} style={{ flex: 1, display: "flex", flexDirection: "column", alignItems: "center", gap: 1, ...(i > 0 ? { borderLeft: "1px solid " + C.hairline } : {}) }}>
+                  <span style={{ fontSize: 7.5, color: C.third }}>{m.label} · {T("vs7dAvg")}</span>
+                  <span style={{ fontSize: 12, fontWeight: 700, color: m.delta === "—" ? C.third : m.color, opacity: m.delta === "—" ? 0.35 : 1, fontVariantNumeric: "tabular-nums" }}>{m.delta}</span>
+                </div>
+              ))}
+            </div>
           </div>
-          <div style={{ textAlign: "right" }}>
-            <span style={{ fontSize: 14, fontWeight: 600, color: C.green, fontVariantNumeric: "tabular-nums" }}>{active != null ? active : "—"}<span style={{ fontSize: 9, color: C.third, fontWeight: 500 }}> {T("minActive")}</span></span>
-          </div>
-        </div>
-        <div style={{ height: 3, borderRadius: 1.5, background: C.card, overflow: "hidden", position: "relative" }}>
-          <div style={{ height: "100%", borderRadius: 1.5, width: stepPct + "%", background: "linear-gradient(90deg,#8BF2A8,#30D158)" }} />
-        </div>
-        <div style={{ display: "flex", padding: "7px 0", borderTop: "1px solid " + C.hairline, borderBottom: "1px solid " + C.hairline, position: "relative" }}>
-          {metrics.map(function (m, i) {
-            return (
-              <div key={i} style={{ flex: 1, display: "flex", flexDirection: "column", alignItems: "center", gap: 2, position: "relative", ...(i > 0 ? { borderLeft: "1px solid " + C.hairline } : {}) }}>
-                <span style={{ fontSize: 8, color: C.third, fontWeight: 500, letterSpacing: 0.3 }}>{m.label}</span>
-                <span style={{ fontSize: 15, fontWeight: 600, color: m.color, letterSpacing: -0.3, fontVariantNumeric: "tabular-nums" }}>{m.value != null ? m.value : "—"}</span>
-                <span style={{ fontSize: 7.5, color: C.third, fontWeight: 500 }}>{m.unit}</span>
+        ) : (
+          <div className="hd-view-enter" style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+            <div
+              className="hd-click-area"
+              onClick={() => setShowTrend(true)}
+              title={T("trendHint")}
+              style={{ display: "flex", alignItems: "flex-end", justifyContent: "space-between", padding: "0 4px", position: "relative", cursor: "pointer", borderRadius: 8 }}
+            >
+              <div style={{ display: "flex", flexDirection: "column" }}>
+                <div style={{ display: "flex", alignItems: "baseline", gap: 7 }}>
+                  <span style={{ fontSize: 46, fontWeight: 700, lineHeight: 1, letterSpacing: -2, color: C.label, fontVariantNumeric: "tabular-nums", opacity: steps ? 1 : 0.32 }}>{steps ? steps.toLocaleString() : "—"}</span>
+                  {goalDone && (
+                    <span title={T("goalReached")} style={{ fontSize: 9, fontWeight: 700, color: C.green, background: "rgba(48,209,88,0.14)", padding: "1.5px 6px", borderRadius: brutal || isPixel(styleId) ? 0 : 99, border: "1px solid " + C.green }}>
+                      ★ {stepPct}%
+                    </span>
+                  )}
+                </div>
+                <span style={{ fontSize: 11.5, fontWeight: 500, color: C.second, marginTop: 4, letterSpacing: 0.3 }}>
+                  {midLine}
+                </span>
               </div>
-            );
-          })}
-        </div>
-        <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "0 2px", position: "relative" }}>
-          <span style={{ fontSize: 9, color: C.third, fontWeight: 500, flexShrink: 0 }}>{T("sleep")}</span>
-          <span style={{ fontSize: 12, fontWeight: 600, color: C.label, fontVariantNumeric: "tabular-nums", flexShrink: 0 }}>{fmtSleep(sleep) || "—"}</span>
-          <div style={{ flex: 1, height: 4, borderRadius: 2, overflow: "hidden", display: "flex" }}>
-            {(sleepTotal ? sleepStages : [{ k: "x", v: 1, c: C.hairline }]).map(function (p) { return <div key={p.k} style={{ flex: Math.max(p.v, 0.001), background: p.c, height: "100%" }} />; })}
+              <div style={{ textAlign: "right" }}>
+                <span style={{ fontSize: 14, fontWeight: 600, color: C.green, fontVariantNumeric: "tabular-nums" }}>{active != null ? active : "—"}<span style={{ fontSize: 9, color: C.third, fontWeight: 500 }}> {T("minActive")}</span></span>
+              </div>
+            </div>
+            <div style={{ height: 4.5, borderRadius: brutal || isPixel(styleId) ? 0 : 99, background: C.card, boxShadow: brutal || term || isPixel(styleId) ? "none" : "inset 0 0.5px 1px rgba(0,0,0,0.16)", overflow: "hidden", position: "relative" }}>
+              <div style={{ height: "100%", borderRadius: brutal || isPixel(styleId) ? 0 : 99, width: stepPct + "%", background: "linear-gradient(90deg, #5CE68B 0%, #30D158 60%, #9EFFB8 100%)", boxShadow: brutal || term || isPixel(styleId) ? "none" : "0 0 8px rgba(48,209,88,0.38)", transition: "width .45s cubic-bezier(.2,.8,.2,1)" }} />
+            </div>
+            <div
+              className="hd-click-area"
+              onClick={() => setShowTrend(true)}
+              title={T("trendHint")}
+              style={{
+                display: "flex",
+                padding: "7px 0",
+                borderTop: "1px solid " + C.hairline,
+                borderBottom: "1px solid " + C.hairline,
+                position: "relative",
+                cursor: "pointer",
+              }}
+            >
+              {metrics.map(function (m, i) {
+                const empty = m.value == null;
+                const softDivider = !brutal && !term && !isPixel(styleId);
+                return (
+                  <div
+                    key={i}
+                    style={{
+                      flex: 1,
+                      display: "flex",
+                      flexDirection: "column",
+                      alignItems: "center",
+                      gap: 2,
+                      position: "relative",
+                      ...(i > 0 && !softDivider ? { borderLeft: "1px solid " + C.hairline } : {}),
+                    }}
+                  >
+                    {i > 0 && softDivider && (
+                      <div style={{ position: "absolute", left: 0, top: "12%", bottom: "12%", width: 1, background: "linear-gradient(180deg, transparent, " + C.hairline + ", transparent)" }} />
+                    )}
+                    <span style={{ fontSize: 8, color: C.third, fontWeight: 500, letterSpacing: 0.3 }}>{m.label}</span>
+                    <span style={{ fontSize: 15, fontWeight: 600, color: empty ? C.third : m.color, opacity: empty ? 0.28 : 1, letterSpacing: -0.3, fontVariantNumeric: "tabular-nums" }}>{empty ? "—" : m.value}</span>
+                    <span style={{ fontSize: 7.5, color: C.third, fontWeight: 500, opacity: empty ? 0.45 : 0.85 }}>{m.unit}</span>
+                  </div>
+                );
+              })}
+            </div>
+            <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "0 2px", position: "relative" }}>
+              <span style={{ fontSize: 9, color: C.third, fontWeight: 500, flexShrink: 0 }}>{T("sleep")}</span>
+              <span style={{ fontSize: 12, fontWeight: 600, color: C.label, opacity: sleep ? 1 : 0.32, fontVariantNumeric: "tabular-nums", flexShrink: 0 }}>{fmtSleep(sleep) || "—"}</span>
+              <div style={{ flex: 1, height: 4.5, borderRadius: brutal || isPixel(styleId) ? 0 : 99, overflow: "hidden", display: "flex", gap: sleepTotal && !brutal && !isPixel(styleId) ? 2 : 0 }}>
+                {(sleepTotal ? sleepStages.filter((p) => p.v > 0) : [{ k: "x", v: 1, c: C.card }]).map(function (p) {
+                  return <div key={p.k} style={{ flex: Math.max(p.v, 0.001), background: p.c, height: "100%", borderRadius: brutal || isPixel(styleId) ? 0 : 99 }} />;
+                })}
+              </div>
+              <span style={{ fontSize: 8.5, color: C.third, flexShrink: 0, fontVariantNumeric: "tabular-nums" }}>{t.sleep_deep_min ? T("deepShort") + t.sleep_deep_min + "·REM" + (t.sleep_rem_min || 0) : ""}</span>
+            </div>
           </div>
-          <span style={{ fontSize: 8.5, color: C.third, flexShrink: 0, fontVariantNumeric: "tabular-nums" }}>{t.sleep_deep_min ? T("deepShort") + t.sleep_deep_min + "·REM" + (t.sleep_rem_min || 0) : ""}</span>
-        </div>
+        )}
         {tipText && (
           isPixel(styleId) ? (
-            // RPG 对话框：2px 黑边 + 四角金色角块装饰（绝对定位伪元素）+ 等宽字体 + 0 圆角
-            <div style={{ position: "relative", padding: "5px 8px 5px 12px", background: C.card, border: "2px solid #1a1040", borderRadius: 0, marginTop: 4 }}>
+            // RPG 对话框：2px 黑边 + 四角金色角块装饰（绝对定位伪元素）+ 等宽字体 + 0 圆角；点击即换一句
+            <div
+              onClick={onCycleTip}
+              title={T("clickNextTip")}
+              style={{ position: "relative", padding: "5px 8px 5px 12px", background: C.card, border: "2px solid #1a1040", borderRadius: 0, marginTop: 4, cursor: "pointer" }}
+            >
               <div style={{ position: "absolute", left: 4, top: 4, width: 4, height: 4, background: C.rim }} />
               <div style={{ position: "absolute", right: 4, top: 4, width: 4, height: 4, background: C.rim }} />
               <div style={{ position: "absolute", left: 4, bottom: 4, width: 4, height: 4, background: C.rim }} />
@@ -967,7 +1314,11 @@ function Widget({ data, settings, appIdentity, character, onRefresh, onReset, ju
               <span style={{ fontSize: 9, color: C.label, fontFamily: "ui-monospace, 'SF Mono', Menlo, Monaco, monospace", fontWeight: 700, lineHeight: 1.35, flex: 1, display: "block" }}>{tipText}</span>
             </div>
           ) : (
-            <div style={{ display: "flex", alignItems: "center", gap: 6, padding: "0 2px", position: "relative" }}>
+            <div
+              onClick={onCycleTip}
+              title={T("clickNextTip")}
+              style={{ display: "flex", alignItems: "center", gap: 6, padding: "0 2px", position: "relative", cursor: "pointer" }}
+            >
               {term ? <span style={{ color: C.green, fontWeight: 700, fontSize: 9, flexShrink: 0 }}>#</span> : <span style={{ width: 4, height: 4, borderRadius: brutal ? 0 : "50%", background: tipDot, opacity: 0.9, flexShrink: 0, boxShadow: brutal ? "none" : "0 0 6px " + tipDot }} />}
               <span style={{ fontSize: 9.5, color: C.second, fontWeight: 500, lineHeight: 1.3, flex: 1, overflow: "hidden", display: "-webkit-box", WebkitLineClamp: 2, WebkitBoxOrient: "vertical" }}>{tipText}</span>
             </div>
@@ -983,33 +1334,62 @@ function tauriAvailable() {
   return typeof window !== "undefined" && (window.__TAURI_INTERNALS__ || window.__TAURI__);
 }
 
+// AI 提示去重记忆（记住最近 6 条，防止每次都说差不多的话）
+const RECENT_TIPS_KEY = "hd-recent-ai-tips-v1";
+let LAST_FOCUS_IDX = -1;
+let LAST_TONE_IDX = -1;
+
+function loadRecentTips() {
+  try {
+    const arr = JSON.parse(localStorage.getItem(RECENT_TIPS_KEY) || "[]");
+    return Array.isArray(arr) ? arr.slice(-6) : [];
+  } catch (e) {
+    return [];
+  }
+}
+function pushRecentTip(tip) {
+  if (!tip) return;
+  try {
+    const arr = loadRecentTips().filter((x) => x !== tip);
+    arr.push(tip);
+    localStorage.setItem(RECENT_TIPS_KEY, JSON.stringify(arr.slice(-6)));
+  } catch (e) {}
+}
+
+function pickAvoidLast(list, lastIdx) {
+  if (list.length <= 1) return { item: list[0], idx: 0 };
+  let idx = Math.floor(Math.random() * list.length);
+  if (idx === lastIdx) idx = (idx + 1 + Math.floor(Math.random() * (list.length - 1))) % list.length;
+  return { item: list[idx], idx };
+}
+
+const CHAR_PERSONAS = {
+  qiuqiu: "你的名字叫「球球」，性格软萌粘人、元气好奇，像一颗蹲在桌角陪着主人的小团子，说话带一点俏皮亲昵感",
+  nimbo: "你的名字叫「云宝」，性格温柔松弛、佛系治愈，像一朵慢悠悠飘在桌角的云，说话轻柔舒缓、不催不躁",
+  twinkle: "你的名字叫「亮亮」，性格轻快机灵、像清晨的一束小阳光，说话利落阳光、给人充满电的感觉",
+  claw: "你的名字叫「钳钳」，性格是冷幽默的极客损友，一针见血带点小毒舌但内心很关心对方，说话酷且好玩",
+};
+
 // 大模型实时底部提示
-async function genAiTip(data, settings, rolling_averages) {
+async function genAiTip(data, settings, rolling_averages, character) {
   if (!settings.llm_base_url || !settings.llm_api_key) return null;
   const td = data && data.today ? data.today : {};
   const hist = (data && Array.isArray(data.history)) ? data.history : [];
-  
-  // --- 极致优化：同比匹配算法 (Sameday Matching) ---
-  // 目标：在历史中寻找与当前时间最接近的“昨日同期”快照，并处理可能的跨天边界情况。
-  let yd = null;
-  if (hist.length > 0) {
-    const now = new Date();
-    const now_minutes = now.getHours() * 60 + now.getMinutes();
-    let minDiff = Infinity;
 
-    // 遍历历史记录（排除今天）
+  // --- 同比匹配算法 (Sameday Matching) ---
+  let yd = null;
+  const now = new Date();
+  const hr = now.getHours();
+  if (hist.length > 0) {
+    const now_minutes = hr * 60 + now.getMinutes();
+    let minDiff = Infinity;
     for (const h of hist) {
       if (h.date === td.date) continue;
-
       const h_time = h.time || "00:00";
       const [h_h, h_m] = h_time.split(":").map(Number);
       const h_minutes = h_h * 60 + h_m;
-
-      // 计算绝对分钟差（处理半夜跨天逻辑：例如 00:10 与 23:50 的差值是 20 分钟）
       let diff = Math.abs(now_minutes - h_minutes);
-      if (diff > 720) diff = 1440 - diff; // 考虑 24 小时循环
-
-      // 如果在 30 分钟窗口内，且是目前找到的最接近的
+      if (diff > 720) diff = 1440 - diff;
       if (diff <= 30 && diff < minDiff) {
         minDiff = diff;
         yd = h;
@@ -1017,55 +1397,106 @@ async function genAiTip(data, settings, rolling_averages) {
     }
   }
 
-  // --- 构造强类型的对比对象 ---
-  // 确保缺失的数据明确为 null，防止 AI 在面对 {} 时产生幻觉
   const g = (v) => (v === null || v === undefined ? null : v);
-  
-  const today_ = { 
-    steps: g(td.steps), 
-    active: g(td.active_minutes), 
-    sleep: g(td.sleep_asleep_min), 
-    resting_hr: g(td.resting_hr), 
-    hrv: g(td.hrv), 
-    spo2: g(td.spo2) 
+  const today_ = {
+    steps: g(td.steps),
+    active: g(td.active_minutes),
+    sleep_min: g(td.sleep_asleep_min),
+    heart_rate: g(td.heart_rate),
+    resting_hr: g(td.resting_hr),
+    hrv: g(td.hrv),
+    spo2: g(td.spo2),
+    device_battery_pct: g(td.device_battery),
+    sedentary: !!td.sedentary,
+    idle_min: g(td.idle_min),
+    device_sync_stale: !!td.sync_stale,
   };
-  
-  const yd_ = yd ? { 
-    steps: g(yd.steps),  
-    active: g(yd.active_minutes),  
-    sleep: g(yd.sleep_asleep_min),  
-    resting_hr: g(yd.resting_hr),  
-    hrv: g(yd.hrv),  
-    spo2: g(yd.spo2)  
-  } : null; // 如果没找到同期数据，设为 null
+  const yd_ = yd ? {
+    steps: g(yd.steps),
+    active: g(yd.active_minutes),
+    sleep_min: g(yd.sleep_asleep_min),
+    resting_hr: g(yd.resting_hr),
+    hrv: g(yd.hrv),
+    spo2: g(yd.spo2),
+  } : null;
 
-  const comparison = { 
-    今日: today_, 
-    昨日同期: yd_, // 可能是 null
-    七日平均: rolling_averages 
-  };
+  const period =
+    hr < 6 ? "深夜" : hr < 10 ? "清晨" : hr < 12 ? "上午" :
+    hr < 14 ? "午间" : hr < 18 ? "下午" : hr < 22 ? "傍晚" : "睡前";
+  const timeStr = `${String(hr).padStart(2, "0")}:${String(now.getMinutes()).padStart(2, "0")} (${period})`;
 
+  // 按当前有效数据动态生成切入点池，避免每次都只聊步数
+  const focusPool = [];
+  if (today_.device_sync_stale) {
+    focusPool.push("手环好久没同步：顺口提醒对方看看手环是不是没电了或忘了戴");
+  }
+  if (today_.device_battery_pct != null && today_.device_battery_pct <= 25) {
+    focusPool.push(`手环电量低(${today_.device_battery_pct}%)：顺口提醒对方手环快没电了，洗澡或休息时记得充个电`);
+  }
+  if (today_.sedentary && (today_.idle_min || 0) >= 30) {
+    focusPool.push("久坐提醒：抓住坐太久这件事轻推一把，催对方起身走两步或伸个懒腰");
+  }
+  if (today_.sleep_min && hr < 15) {
+    focusPool.push("睡眠感受：结合昨晚睡眠时长顺口关心精力状态");
+  }
+  if (today_.steps != null || today_.active != null) {
+    focusPool.push("活动节奏：顺着当前步数或活跃分钟随口夸一句或逗一句");
+  }
+  if (today_.heart_rate != null || today_.resting_hr != null || today_.hrv != null) {
+    focusPool.push("身体状态：从心率或 HRV 感受对方今天是松弛还是有点累，不报枯燥术语");
+  }
+  if (hr >= 19) {
+    focusPool.push("今日晚间小结：结合今天走的步数和身体节奏，给一句温暖的今日收尾或睡前放松提醒");
+  }
+  focusPool.push(`此刻时段(${period})：结合现在的时间点和整体状态，给一句接地气的生活小提醒`);
+
+  const tones = [
+    "像熟人发微信，轻松带点小调侃，别端着",
+    "温柔松弛，像朋友递来一杯水的口吻",
+    "极简短句，利落直接，不说废话",
+    "带一点日常画面感（比如窗边、伸懒腰、倒水、散步）",
+    "轻快打气，让人看了一眼心情变好",
+  ];
+  const pickedFocus = pickAvoidLast(focusPool, LAST_FOCUS_IDX);
+  LAST_FOCUS_IDX = pickedFocus.idx;
+  const pickedTone = pickAvoidLast(tones, LAST_TONE_IDX);
+  LAST_TONE_IDX = pickedTone.idx;
+
+  const persona = CHAR_PERSONAS[character] || CHAR_PERSONAS.qiuqiu;
+  const lang = settings.language || "zh-CN";
+  const langRule =
+    lang === "en"
+      ? "Reply in natural, casual English within 60 characters (no emojis, no quotes)."
+      : lang === "ja"
+      ? "自然な日本語（です/ます過ぎない親しい口調）で30文字以内（句読点含む、絵文字・鍵括弧禁止）。"
+      : "使用自然口语中文，30字以内（含标点），不加引号和表情符号。";
+
+  const recentTips = loadRecentTips();
   const base = settings.llm_base_url.replace(/\/+$/, "");
   const url  = base + "/chat/completions";
   // 方舟 coding 端点不认 "auto"，UI 若选 auto 需兜底到具体模型，否则 404
   const model = (settings.llm_model && settings.llm_model !== "auto")
     ? settings.llm_model : "deepseek-v4-flash";
-  
-  // --- 重构 System Prompt：引入逻辑优先级与防御性规则 ---
-  const sys  =`你是一个亲近、理性的健康助理。我会为你提供“今日”数据、“昨日同期”数据（可能为null）以及“七日平均值”。
 
-请遵循以下逻辑规则进行深度观察：
-1. **优先级**：今日数据 > 昨日同期 > 七日平均。
-2. **对比逻辑**：
-   - 若“昨日同期”存在：请对比今日与昨日的差异（增多/减少/持平），并结合“七日平均值”判断当前状态是处于“常规水平”还是“异常波动”。
-   - 若“昨日同期”为null：**严禁**进行数值对比！请仅根据“今日”与“七日平均值”的关系，判断今日是“高于平均”还是“低于平均”。
-3. **输出规范**：
-   - 30 字以内（含标点）的中文，严禁超过 30 字；正常使用中文标点：句末用句号「。」，句中可用逗号「，」。
-   - 必须明确趋势（增多/减少/差不多）。
-   - 口吻亲切自然，像朋友提醒。
-   - 禁止表情符号、专业术语与冗余解释。`;
+  const sys = `你是蹲在用户电脑桌角的小搭子（${persona}），根据健康数据随口说一句人话。
+核心要求：
+1. 像真人朋友聊天，绝不说官腔和播报腔。严禁使用「处于常规水平」「异常波动」「建议您」「请注意」「今日数据」「较昨日增多/减少」这类死板模板词。
+2. 数据只是参考，不要机械报数或把所有指标念一遍，抓住一个有意思的细节就行；没数据时绝不编造。
+3. 本次切入点：${pickedFocus.item}
+4. 本次语气：${pickedTone.item}
+5. ${langRule}
+只输出最终这一句话，不要前缀、解释或换行。`;
 
-  const user = JSON.stringify(comparison) + "\n随机因子:" + Math.random();
+  const payload = {
+    时间: timeStr,
+    今日: today_,
+    昨日同期: yd_,
+    七日平均: rolling_averages || null,
+  };
+  let user = JSON.stringify(payload);
+  if (recentTips.length > 0) {
+    user += "\n最近说过（必须换完全不同的说法、句式和角度，严禁雷同）：\n- " + recentTips.join("\n- ");
+  }
   const messages = [{ role: "system", content: sys }, { role: "user", content: user }];
 
   try {
@@ -1084,7 +1515,7 @@ async function genAiTip(data, settings, rolling_averages) {
       const r = await fetch(url, {
         method: "POST",
         headers: { "Content-Type": "application/json", Authorization: "Bearer " + settings.llm_api_key },
-        body: JSON.stringify({ model, messages, temperature: 0.9, max_tokens: 1024 }),
+        body: JSON.stringify({ model, messages, temperature: 1.0, max_tokens: 1024 }),
         signal: ctl.signal,
       });
       clearTimeout(timer);
@@ -1104,16 +1535,18 @@ async function genAiTip(data, settings, rolling_averages) {
     }
     // 思考过程(reasoning_content)绝不展示给用户；content 剥离思考后为空则回退静态提示，不拿推理当答案
     if (!c) return null;
-    c = c.replace(/\*+/g, "").trim();
-    // 硬性限制 30 字（含标点）：超出则截断，并尽量在句末标点处收尾，避免把句号截掉
+    c = c.replace(/\*+/g, "").replace(/^[「"“'『]+|[」"”'』]+$/g, "").split(/\r?\n/)[0].trim();
+    // 长度兜底：中文/日文 30 字，英文 65 字符
+    const maxLen = lang === "en" ? 65 : 30;
     const chars = Array.from(c);
-    if (chars.length > 30) {
-      let cut = chars.slice(0, 30);
-      for (let i = cut.length - 1; i >= Math.max(0, cut.length - 3); i--) {
-        if (/[。！？!?…]/.test(cut[i])) { cut = cut.slice(0, i + 1); break; }
+    if (chars.length > maxLen) {
+      let cut = chars.slice(0, maxLen);
+      for (let i = cut.length - 1; i >= Math.max(0, cut.length - 4); i--) {
+        if (/[。！？!?….]/.test(cut[i])) { cut = cut.slice(0, i + 1); break; }
       }
       c = cut.join("");
     }
+    pushRecentTip(c);
     return c;
   } catch (e) {
     return null;
@@ -1284,7 +1717,7 @@ export default function App() {
           if (!silent) setAiThinking(true);
           let tip = null;
           try {
-            tip = await genAiTip(parsed, s, parsed.rolling_averages);
+            tip = await genAiTip(parsed, s, parsed.rolling_averages, activeCharRef.current);
           } catch (e) {
             console.warn("ai tip failed", e);
           } finally {
@@ -1328,17 +1761,33 @@ export default function App() {
   const onRefresh = useCallback(async () => {
     document.body.classList.add("hd-refreshing");
     forceAiRefreshRef.current = true; // 手动刷新强制重调 AI tip（每次点刷新都出新提示）
-    // 记住当前数据签名，等 Python 采集真正写完（数据变化）再读新数据
-    const beforeSig = data && data.today
-      ? [data.today.steps, data.today.distance, data.today.calories, data.today.updated_at].join("|")
-      : null;
     if (tauriAvailable()) {
       try { await invoke("refresh_now"); } catch (e) {}
     }
     // 即时反馈：3s 后撤掉旋转动画（refresh_now 是非阻塞的，UI 不该再"假死"；
     // 真正的数据更新由后台 5s 自动轮询接管，不再阻塞 UI 等到 Python 写完）
     setTimeout(() => document.body.classList.remove("hd-refreshing"), 3000);
-  }, [load, data]);
+  }, []);
+
+  // 点击底部 AI 提示语 → 立即换一句（无需重拉 Google Health API）
+  const onCycleTip = useCallback(async () => {
+    const s = settingsRef.current;
+    if (!s || !s.llm_base_url || !s.llm_api_key || !data || aiBusyRef.current) return;
+    aiBusyRef.current = true;
+    setAiThinking(true);
+    try {
+      const tip = await genAiTip(data, s, data.rolling_averages, activeCharRef.current);
+      if (tip) {
+        aiTipRef.current = tip;
+        setAiTip(tip);
+      }
+    } catch (e) {
+      console.warn("cycle ai tip failed", e);
+    } finally {
+      aiBusyRef.current = false;
+      setAiThinking(false);
+    }
+  }, [data]);
 
   const onReset = useCallback(async () => {
     setJustResetAt(Date.now());
@@ -1398,7 +1847,12 @@ export default function App() {
     let unlisten1 = null;
     import("@tauri-apps/api/event").then(({ listen }) => {
       listen("toggle-settings", () => {
-        setSettingsOpen(prev => !prev);
+        setSettingsOpen((prev) => {
+          if (!prev && settingsRef.current) {
+            setDraft({ ...settingsRef.current, useCurrent: false });
+          }
+          return !prev;
+        });
       }).then(u => { unlisten1 = u; });
 
     });
@@ -1415,7 +1869,7 @@ export default function App() {
         setSystemDark(dark);
         const s = settingsRef.current;
         const eff = !s ? dark : s.theme === "dark" ? true : s.theme === "light" ? false : dark;
-        C = pickPalette(settingsRef.current.style, eff);
+        C = pickPalette(s ? s.style : "liquid-glass", eff);
         rerender();
       }).then((u) => { unlisten = u; });
     });
@@ -1444,7 +1898,7 @@ export default function App() {
             aiBusyRef.current = true;
             lastAiTryRef.current = Date.now();
             setAiThinking(true);
-            const tip = await genAiTip(data, s, data.rolling_averages);
+            const tip = await genAiTip(data, s, data.rolling_averages, activeCharRef.current);
             aiBusyRef.current = false;
             setAiThinking(false);
             if (tip) { aiTipRef.current = tip; setAiTip(tip); }
@@ -1459,6 +1913,38 @@ export default function App() {
     return () => { if (unlisten) unlisten(); };
   }, [systemDark, rerender]);
 
+  const [powerPaused, setPowerPaused] = useState(false);
+  const powerPausedRef = useRef(false);
+  powerPausedRef.current = powerPaused;
+
+  // 锁屏 / 隐藏窗口省电休眠同步：收到后端 power-paused 或页面不可见时冻结动画与轮询
+  useEffect(() => {
+    const onVis = () => setPowerPaused(document.hidden);
+    document.addEventListener("visibilitychange", onVis);
+    let unlisten = null;
+    let disposed = false;
+    if (tauriAvailable()) {
+      import("@tauri-apps/api/event")
+        .then(({ listen }) =>
+          listen("power-paused", (e) => {
+            const paused = !!e.payload;
+            setPowerPaused(paused);
+            if (!paused) load();
+          })
+        )
+        .then((fn) => {
+          if (disposed) fn();
+          else unlisten = fn;
+        })
+        .catch(() => {});
+    }
+    return () => {
+      disposed = true;
+      document.removeEventListener("visibilitychange", onVis);
+      if (unlisten) unlisten();
+    };
+  }, [load]);
+
   // 角色选择 / 随机轮换：菜单设置 character='random' 时在四个角色间随机轮换
   useEffect(() => {
     if (characterPref !== "random") {
@@ -1467,6 +1953,7 @@ export default function App() {
     }
     const pool = ["qiuqiu", "nimbo", "twinkle", "claw"];
     const pick = () => {
+      if (powerPausedRef.current) return;
       let next = pool[Math.floor(Math.random() * pool.length)];
       if (next === activeCharRef.current && pool.length > 1) {
         next = pool[(pool.indexOf(next) + 1) % pool.length];
@@ -1485,8 +1972,27 @@ export default function App() {
       await loadSettings();
       await load();
     })();
-    const id = setInterval(load, 5000); // 轻量轮询，数据变化即重渲染
-    return () => clearInterval(id);
+    // 监听后端采集/重置完成推送的 data-updated 事件，立即刷新；
+    // 定时器降为 30 秒低频兜底（锁屏/隐藏休眠期间跳过）
+    let unlisten = null;
+    let disposed = false;
+    if (tauriAvailable()) {
+      import("@tauri-apps/api/event")
+        .then(({ listen }) => listen("data-updated", () => { if (!powerPausedRef.current) load(); }))
+        .then((fn) => {
+          if (disposed) fn();
+          else unlisten = fn;
+        })
+        .catch(() => {});
+    }
+    const id = setInterval(() => {
+      if (!powerPausedRef.current && !document.hidden) load();
+    }, 30000);
+    return () => {
+      disposed = true;
+      if (unlisten) unlisten();
+      clearInterval(id);
+    };
   }, [loadSettings, load]);
 
   const bottomTip = aiThinking ? T("aiThinking") : (aiTip || null);
@@ -1501,12 +2007,14 @@ export default function App() {
           character={activeChar}
           onRefresh={onRefresh}
           onReset={onReset}
+          onCycleTip={onCycleTip}
           justResetAt={justResetAt}
           sedPopRef={sedPopRef}
           dndActive={dndActive}
           bottomTip={bottomTip}
           forceWidgetPop={forceWidgetPop}
           setForceWidgetPop={setForceWidgetPop}
+          powerPaused={powerPaused}
         />
       ) : (
         <div style={{ width: "100%", height: "100%", display: "flex", alignItems: "center", justifyContent: "center", color: C.third, fontSize: 12 }}>

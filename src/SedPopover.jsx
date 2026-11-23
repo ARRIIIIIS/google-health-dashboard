@@ -1,10 +1,10 @@
 // SedPopover.jsx -- 菜单栏图标下方的久坐提醒弹窗（独立小窗口 sed-pop 渲染）
 // 样式与小组件内的久坐弹窗完全一致（同配色/同文案/同按钮）。
-// 主题随 settings.style 切换：液态玻璃（Apple 琥珀磨砂） / 像素动漫风（实底金方块）。
+// 主题随 settings.style 切换：液态玻璃 / 像素动漫风 / 网页粗野主义 / 开发者终端。
 import React, { useEffect, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { getCurrentWindow } from "@tauri-apps/api/window";
-import { t as T } from "./i18n.js";
+import { t as T, setLang } from "./i18n.js";
 
 const SW = 2;
 const ICO_CHAIR = (
@@ -27,6 +27,8 @@ export default function SedPopover() {
   const [idleMin, setIdleMin] = useState(0);
   const [dismissed, setDismissed] = useState(false);
   const [style, setStyle] = useState("liquid-glass");
+  const [dark, setDark] = useState(true);
+  const [, setLangTick] = useState(0);
 
   useEffect(() => {
     let dead = false;
@@ -49,18 +51,39 @@ export default function SedPopover() {
       } catch (e) { /* 忽略 */ }
     };
     read();
-    const id = setInterval(read, 3000);
-    // 同步主题：弹窗通常点设置后才被打开，但 settings 可能中途变（菜单栏「主题」切）
+    const id = setInterval(read, 15000);
+    // 同步主题与语言：弹窗通常点设置后才被打开，但 settings 可能中途变（菜单栏切换）
     const syncStyle = async () => {
       try {
         const j = await invoke("get_settings");
         const s = JSON.parse(j);
         setStyle(s.style || "liquid-glass");
+        setLang(s.language || "zh-CN");
+        let isDark = true;
+        if (s.theme === "dark") isDark = true;
+        else if (s.theme === "light") isDark = false;
+        else {
+          try { isDark = (await invoke("get_appearance")) === "dark"; } catch (_) {}
+        }
+        setDark(isDark);
+        setLangTick((n) => n + 1);
       } catch (e) {}
     };
     syncStyle();
-    const styleId = setInterval(syncStyle, 4000);
-    return () => { dead = true; clearInterval(id); clearInterval(styleId); };
+    let unlistenData = null;
+    let unlistenSettings = null;
+    import("@tauri-apps/api/event")
+      .then(({ listen }) => {
+        listen("data-updated", () => read()).then((fn) => { if (dead) fn(); else unlistenData = fn; });
+        listen("settings-changed", () => syncStyle()).then((fn) => { if (dead) fn(); else unlistenSettings = fn; });
+      })
+      .catch(() => {});
+    return () => {
+      dead = true;
+      clearInterval(id);
+      if (unlistenData) unlistenData();
+      if (unlistenSettings) unlistenSettings();
+    };
   }, []);
 
   const onLater = async () => {
@@ -77,7 +100,65 @@ export default function SedPopover() {
   if (dismissed) return null;
 
   const isPixel = style === "pixel-anime";
+  const isBrutal = style === "brutalist-web";
+  const isTerm = style === "developer-terminal";
   const mono = "ui-monospace, 'SF Mono', Menlo, Monaco, monospace";
+
+  const st = (() => {
+    if (isPixel) {
+      return {
+        card: { width: 186, borderRadius: 0, padding: "9px 11px 8px", boxSizing: "border-box", position: "relative", background: PIXEL.amber, border: "2px solid " + PIXEL.ink, boxShadow: "4px 4px 0 " + PIXEL.ink, animation: "sed-pop .15s steps(4)", fontFamily: mono },
+        arrow: { position: "absolute", top: -5, left: "50%", marginLeft: -5, width: 10, height: 10, background: PIXEL.amber, border: "2px solid " + PIXEL.ink, borderRight: "none", borderBottom: "none" },
+        title: { fontSize: 10.5, fontWeight: 700, color: PIXEL.ink, fontFamily: mono, textTransform: "uppercase", letterSpacing: 0.5, display: "flex", alignItems: "center", gap: 5 },
+        hint: { fontSize: 8.5, color: PIXEL.ink, fontFamily: mono, marginTop: 2 },
+        later: { flex: 1, textAlign: "center", fontSize: 9, fontWeight: 700, color: PIXEL.ink, fontFamily: mono, textTransform: "uppercase", border: "2px solid " + PIXEL.ink, padding: "3px 0", borderRadius: 0, cursor: "pointer" },
+        ok: { flex: 1, textAlign: "center", fontSize: 9, fontWeight: 700, color: "#fff", fontFamily: mono, textTransform: "uppercase", background: PIXEL.ink, border: "2px solid " + PIXEL.ink, padding: "3px 0", borderRadius: 0, cursor: "pointer" },
+      };
+    }
+    if (isBrutal) {
+      const bg = dark ? "#000000" : "#ffffff";
+      const card = dark ? "#101010" : "#f4f4f4";
+      const ink = dark ? "#ffffff" : "#000000";
+      const sub = dark ? "#d9d9d9" : "#333333";
+      const f = "'Courier New', Courier, monospace";
+      return {
+        card: { width: 186, borderRadius: 0, padding: "9px 11px 8px", boxSizing: "border-box", position: "relative", background: card, border: "2px solid " + ink, boxShadow: "4px 4px 0 " + ink, animation: "sed-pop .15s ease", fontFamily: f },
+        arrow: { position: "absolute", top: -5, left: "50%", marginLeft: -5, width: 10, height: 10, background: card, border: "2px solid " + ink, borderRight: "none", borderBottom: "none" },
+        title: { fontSize: 10.5, fontWeight: 700, color: ink, fontFamily: f, letterSpacing: 0.2, display: "flex", alignItems: "center", gap: 5 },
+        hint: { fontSize: 8.5, color: sub, fontFamily: f, marginTop: 2 },
+        later: { flex: 1, textAlign: "center", fontSize: 9, fontWeight: 700, color: ink, fontFamily: f, border: "2px solid " + ink, padding: "3px 0", borderRadius: 0, cursor: "pointer", background: bg },
+        ok: { flex: 1, textAlign: "center", fontSize: 9, fontWeight: 700, color: bg, fontFamily: f, background: ink, border: "2px solid " + ink, padding: "3px 0", borderRadius: 0, cursor: "pointer" },
+      };
+    }
+    if (isTerm) {
+      const bg = dark ? "#0A0E12" : "#FAFAF4";
+      const card = dark ? "#0D141B" : "#FFFFFF";
+      const border = dark ? "#1F2937" : "#E4E4DA";
+      const green = dark ? "#4AF626" : "#2F9E2F";
+      const second = dark ? "#8BE9FD" : "#0E7C8A";
+      return {
+        card: { width: 186, borderRadius: 3, padding: "9px 11px 8px", boxSizing: "border-box", position: "relative", background: card, border: "1px solid " + border, boxShadow: "none", animation: "sed-pop .15s ease", fontFamily: mono },
+        arrow: { position: "absolute", top: -5, left: "50%", marginLeft: -5, width: 10, height: 10, background: card, border: "1px solid " + border, borderRight: "none", borderBottom: "none" },
+        title: { fontSize: 10.5, fontWeight: 700, color: green, fontFamily: mono, letterSpacing: 0.2, display: "flex", alignItems: "center", gap: 5 },
+        hint: { fontSize: 8.5, color: second, fontFamily: mono, marginTop: 2 },
+        later: { flex: 1, textAlign: "center", fontSize: 9, fontWeight: 700, color: second, fontFamily: mono, border: "1px solid " + border, padding: "3px 0", borderRadius: 3, cursor: "pointer", background: "transparent" },
+        ok: { flex: 1, textAlign: "center", fontSize: 9, fontWeight: 700, color: bg, fontFamily: mono, background: green, border: "1px solid " + green, padding: "3px 0", borderRadius: 3, cursor: "pointer" },
+      };
+    }
+    return {
+      card: { width: 186, borderRadius: 12, padding: "9px 11px 8px", boxSizing: "border-box", position: "relative", background: "rgba(38,30,18,0.92)", backdropFilter: "blur(20px)", WebkitBackdropFilter: "blur(20px)", border: "1px solid rgba(255,159,10,0.45)", animation: "sed-pop .4s cubic-bezier(.2,.9,.3,1.15)", fontFamily: "-apple-system, BlinkMacSystemFont, 'SF Pro Text', 'PingFang SC', sans-serif" },
+      arrow: { position: "absolute", top: -4.5, left: "50%", marginLeft: -4.5, width: 9, height: 9, background: "rgba(38,30,18,0.92)", borderLeft: "1px solid rgba(255,159,10,0.45)", borderTop: "1px solid rgba(255,159,10,0.45)", transform: "rotate(45deg)" },
+      title: { fontSize: 10.5, fontWeight: 700, color: AMBER, letterSpacing: 0.2, display: "flex", alignItems: "center", gap: 5 },
+      hint: { fontSize: 8.5, color: "rgba(255,159,10,0.65)", marginTop: 2 },
+      later: { flex: 1, textAlign: "center", fontSize: 9, fontWeight: 600, color: "rgba(255,159,10,0.65)", border: "1px solid rgba(255,159,10,0.35)", padding: "3px 0", borderRadius: 99, cursor: "pointer" },
+      ok: { flex: 1, textAlign: "center", fontSize: 9, fontWeight: 600, color: "#0a0a0c", background: AMBER, padding: "4px 0", borderRadius: 99, cursor: "pointer" },
+    };
+  })();
+
+  const microPool = T("microHabits");
+  const standHintText = Array.isArray(microPool) && microPool.length
+    ? microPool[(idleMin || 0) % microPool.length]
+    : T("standHint");
 
   return (
       <div
@@ -90,39 +171,19 @@ export default function SedPopover() {
       }}
     >
       <div
-        style={ isPixel ? {
-          // 像素动漫风：实底金方块 + 0 圆角 + 2px 黑边 + 硬边阴影 + 等宽字体
-          width: 186, borderRadius: 0, padding: "9px 11px 8px",
-          boxSizing: "border-box", position: "relative",
-          background: PIXEL.amber, border: "2px solid " + PIXEL.ink,
-          boxShadow: "4px 4px 0 " + PIXEL.ink,
-          animation: "sed-pop .15s steps(4)",
-          fontFamily: mono,
-        } : {
-          width: 186, borderRadius: 12, padding: "9px 11px 8px",
-          boxSizing: "border-box", position: "relative",
-          background: "rgba(38,30,18,0.92)", backdropFilter: "blur(20px)", WebkitBackdropFilter: "blur(20px)",
-          border: "1px solid rgba(255,159,10,0.45)",
-          animation: "sed-pop .4s cubic-bezier(.2,.9,.3,1.15)",
-          fontFamily: "-apple-system, BlinkMacSystemFont, 'SF Pro Text', 'PingFang SC', sans-serif",
-        } }
+        style={st.card}
         onMouseDown={(e) => e.stopPropagation()}
       >
         {/* 顶部箭头（指向菜单栏图标） */}
-        <div style={ isPixel ? { position: "absolute", top: -5, left: "50%", marginLeft: -5, width: 10, height: 10, background: PIXEL.amber, border: "2px solid " + PIXEL.ink, borderRight: "none", borderBottom: "none" } : { position: "absolute", top: -4.5, left: "50%", marginLeft: -4.5, width: 9, height: 9, background: "rgba(38,30,18,0.92)", borderLeft: "1px solid rgba(255,159,10,0.45)", borderTop: "1px solid rgba(255,159,10,0.45)", transform: "rotate(45deg)" } } />
-        <div style={ isPixel ? { fontSize: 10.5, fontWeight: 700, color: PIXEL.ink, fontFamily: mono, textTransform: "uppercase", letterSpacing: 0.5, display: "flex", alignItems: "center", gap: 5 } : { fontSize: 10.5, fontWeight: 700, color: AMBER, letterSpacing: 0.2, display: "flex", alignItems: "center", gap: 5 } }>
+        <div style={st.arrow} />
+        <div style={st.title}>
+          {isTerm ? "[!]" : null}
           {ICO_CHAIR}<span>{T("sedentaryMin", { m: idleMin })}</span>
         </div>
-        <div style={ isPixel ? { fontSize: 8.5, color: PIXEL.ink, fontFamily: mono, marginTop: 2 } : { fontSize: 8.5, color: "rgba(255,159,10,0.65)", marginTop: 2 } }>{T("standHint")}</div>
+        <div style={st.hint}>{standHintText}</div>
         <div style={{ display: "flex", gap: 6, marginTop: 7 }}>
-          <div
-            onMouseDown={function (e) { e.stopPropagation(); onLater(); }}
-            style={ isPixel ? { flex: 1, textAlign: "center", fontSize: 9, fontWeight: 700, color: PIXEL.ink, fontFamily: mono, textTransform: "uppercase", border: "2px solid " + PIXEL.ink, padding: "3px 0", borderRadius: 0, cursor: "pointer" } : { flex: 1, textAlign: "center", fontSize: 9, fontWeight: 600, color: "rgba(255,159,10,0.65)", border: "1px solid rgba(255,159,10,0.35)", padding: "3px 0", borderRadius: 99, cursor: "pointer" } }
-          >{T("later")}</div>
-          <div
-            onMouseDown={function (e) { e.stopPropagation(); onStoodUp(); }}
-            style={ isPixel ? { flex: 1, textAlign: "center", fontSize: 9, fontWeight: 700, color: "#fff", fontFamily: mono, textTransform: "uppercase", background: PIXEL.ink, border: "2px solid " + PIXEL.ink, padding: "3px 0", borderRadius: 0, cursor: "pointer" } : { flex: 1, textAlign: "center", fontSize: 9, fontWeight: 600, color: "#0a0a0c", background: AMBER, padding: "4px 0", borderRadius: 99, cursor: "pointer" } }
-          >{T("stoodUp")}</div>
+          <div onMouseDown={function (e) { e.stopPropagation(); onLater(); }} style={st.later}>{T("later")}</div>
+          <div onMouseDown={function (e) { e.stopPropagation(); onStoodUp(); }} style={st.ok}>{T("stoodUp")}</div>
         </div>
       </div>
     </div>

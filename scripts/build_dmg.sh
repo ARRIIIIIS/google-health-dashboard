@@ -18,7 +18,7 @@
 #   Finder 调好、并逐字段验过的版本，直接复用最稳。
 #
 # 依赖：SetFile（Xcode CLT）。无需 Finder / osascript。
-# 注意：会挂载/卸载卷，需要跳出沙箱执行。
+# 沙箱：可在受限沙箱内直接跑 —— 见下面「为什么用 -mountpoint」。
 
 set -euo pipefail
 
@@ -34,9 +34,11 @@ VOLICON="$REPO/src-tauri/icons/icon.icns"
 PATCHER="$REPO/scripts/patch_dsstore.py"
 
 RW=/tmp/hd-rw.dmg
+# 挂载点固定在 /tmp 下，而不是交给 hdiutil 默认挂到 /Volumes（见第 3 步注释）。
+MNT="${DMG_MOUNTPOINT:-/tmp/hd-dmg-mnt}"
 SETFILE=/Library/Developer/CommandLineTools/usr/bin/SetFile
 GETFILE=/Library/Developer/CommandLineTools/usr/bin/GetFileInfo
-PY="${PYTHON:-python3}"
+PY="${PYTHON:-/usr/bin/python3}"
 
 # 窗口 bounds：内容区 420 + 标题栏 28 + 工具栏 40 + 路径栏 28 = 516。
 # .DS_Store 的 ShowToolbar=false 在 macOS 26 上不被采纳，所以按「工具栏一定在」配高度；
@@ -47,11 +49,20 @@ for f in "$APP" "$DSSTORE" "$BG"; do
   [ -e "$f" ] || { echo "缺少: $f"; exit 1; }
 done
 
-echo "== 1/7 卸载同名卷 =="
+cleanup() {
+  hdiutil detach "$MNT" -force >/dev/null 2>&1 || true
+}
+trap cleanup EXIT
+
+echo "== 1/7 清理上一轮残留 =="
+cleanup
+rm -rf "$MNT"
+# 同名卷若还挂在 /Volumes（历史产物），一并卸掉，免得 SetFile/别名解到旧卷
 for v in /Volumes/"$VOLNAME"*; do
   [ -d "$v" ] && hdiutil detach "$v" -force >/dev/null 2>&1 && echo "  已卸载 $v" || true
 done
 rm -f "$RW"
+mkdir -p "$MNT"
 
 echo "== 2/7 建可写镜像 =="
 # 用空白镜像 + 事后拷贝，而不是 -srcfolder：-srcfolder 对点开头文件的处理不稳，
@@ -59,8 +70,13 @@ echo "== 2/7 建可写镜像 =="
 hdiutil create -size 200m -fs HFS+ -volname "$VOLNAME" -ov "$RW" >/dev/null
 
 echo "== 3/7 挂载 =="
-MNT=$(hdiutil attach "$RW" -readwrite -noverify -noautoopen | grep -o '/Volumes/.*' | head -1)
-echo "  $MNT"
+# 为什么用 -mountpoint 而不用 hdiutil 默认挂载：
+#   默认会挂到 /Volumes/<卷名>，受限沙箱对该路径的写入会被拒
+#   （表现为 ditto/cp 报 file-write-unlink，而 hdiutil attach 本身是成功的）。
+#   挂到 /tmp 下的自建目录即可照常读写，且挂载点不影响成品 dmg 的任何属性
+#   —— 卷名、.DS_Store 版式、别名解析都只认卷内的东西。
+hdiutil attach "$RW" -readwrite -noverify -noautoopen -mountpoint "$MNT" >/dev/null
+echo "  $MNT (volname: $VOLNAME)"
 
 echo "== 4/7 拷贝内容 =="
 # ditto 而不是 cp -R：保留资源分支与扩展属性，否则 .app 的资源可能不完整

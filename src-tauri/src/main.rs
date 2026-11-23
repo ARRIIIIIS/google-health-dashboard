@@ -10,7 +10,6 @@ use std::ffi::CStr;
 use std::os::raw::c_char;
 use std::path::{Path, PathBuf};
 use std::process::Command;
-#[cfg(target_os = "macos")]
 use std::sync::atomic::{AtomicBool, Ordering};
 #[cfg(target_os = "macos")]
 use std::sync::Once;
@@ -74,9 +73,20 @@ struct Settings {
     /// 是否跟随系统勿扰（Focus）抑制久坐提醒。true = 系统勿扰时静默；false = 始终提醒。
     #[serde(default = "default_true")]
     dnd_follow: bool,
+    /// 每日步数目标（默认 8000）
+    #[serde(default = "default_step_goal")]
+    step_goal: u64,
+    /// 久坐提醒生效时段（开始小时 0-23，结束小时 1-24，默认 9:00 - 22:00）
+    #[serde(default = "default_notify_start")]
+    notify_start_hour: u64,
+    #[serde(default = "default_notify_end")]
+    notify_end_hour: u64,
 }
 
 fn default_true() -> bool { true }
+fn default_step_goal() -> u64 { 8000 }
+fn default_notify_start() -> u64 { 9 }
+fn default_notify_end() -> u64 { 22 }
 
 impl Default for Settings {
     fn default() -> Self {
@@ -106,6 +116,9 @@ impl Default for Settings {
             app_name: String::new(),
             custom_icon: String::new(),
             dnd_follow: true,
+            step_goal: 8000,
+            notify_start_hour: 9,
+            notify_end_hour: 22,
         }
     }
 }
@@ -146,29 +159,72 @@ fn custom_icon_file(app: &AppHandle) -> PathBuf {
     dir.join("custom_icon.png")
 }
 
-/// 内置预设图标（base64 PNG，256x256）。避免额外资源文件，纯代码内置几个风格色块。
-/// 预设 id → base64 PNG。
+/// 内置预设图标（base64 PNG，256x256）。使用 SDF 亚像素抗锯齿绘制圆角 Squircle 渐变底 + 白色双能量环。
 fn preset_icon_bytes(id: &str) -> Option<Vec<u8>> {
-    // 用 image crate 现画一个 256x256 的圆角色块图标（比手工 base64 更省事、可扩展）
-    let (r, g, b) = match id {
-        "teal"    => (48, 209, 88),   // 绿
-        "blue"    => (10, 132, 255),  // 蓝
-        "orange"  => (255, 159, 10),  // 橙
-        "purple"  => (175, 82, 222),  // 紫
-        "red"     => (255, 69, 58),   // 红
+    let ((r1, g1, b1), (r2, g2, b2)) = match id {
+        "teal"   => ((56, 229, 125), (16, 158, 82)),
+        "blue"   => ((76, 184, 255), (10, 108, 245)),
+        "orange" => ((255, 196, 61), (242, 112, 18)),
+        "purple" => ((208, 122, 255), (128, 48, 204)),
+        "red"    => ((255, 105, 120), (220, 38, 68)),
         _ => return None,
     };
-    // 256x256 纯色 + 内圆环（模拟健康环）
     use image::{ImageBuffer, Rgba, RgbaImage};
-    let mut img: RgbaImage = ImageBuffer::from_pixel(256, 256, Rgba([r, g, b, 255]));
-    // 画白色内圆（环心）
-    let cx = 128.0_f32; let cy = 128.0_f32;
+    let mut img: RgbaImage = ImageBuffer::from_pixel(256, 256, Rgba([0, 0, 0, 0]));
+    let cx = 127.5_f32;
+    let cy = 127.5_f32;
+    let half_box = 112.0_f32;
+    let corner_r = 52.0_f32;
+    let smooth = |e0: f32, e1: f32, x: f32| -> f32 {
+        let t = ((x - e0) / (e1 - e0)).clamp(0.0, 1.0);
+        t * t * (3.0 - 2.0 * t)
+    };
     for y in 0..256 {
         for x in 0..256 {
-            let d = ((x as f32 - cx).powi(2) + (y as f32 - cy).powi(2)).sqrt();
-            if d > 52.0 && d < 78.0 {
-                img.put_pixel(x, y, Rgba([255, 255, 255, 255]));
+            let px = x as f32 - cx;
+            let py = y as f32 - cy;
+            let qx = px.abs() - half_box + corner_r;
+            let qy = py.abs() - half_box + corner_r;
+            let d_box = (qx.max(0.0).hypot(qy.max(0.0))) + qx.max(qy).min(0.0) - corner_r;
+            if d_box > 1.0 {
+                continue;
             }
+            let box_a = 1.0 - smooth(-0.8, 0.8, d_box);
+            let t = ((px + py) / (half_box * 2.0) + 0.5).clamp(0.0, 1.0);
+            let mut r = r1 as f32 * (1.0 - t) + r2 as f32 * t;
+            let mut g = g1 as f32 * (1.0 - t) + g2 as f32 * t;
+            let mut b = b1 as f32 * (1.0 - t) + b2 as f32 * t;
+
+            // 外能量环 + 内核心圆点（抗锯齿）
+            let dist = px.hypot(py);
+            let d_outer = (dist - 62.0).abs() - 10.5;
+            let d_inner = (dist - 31.0).abs() - 8.0;
+            let ring_a = (1.0 - smooth(-0.9, 0.9, d_outer)) * 0.96
+                + (1.0 - smooth(-0.9, 0.9, d_inner)) * 0.68;
+            let w = ring_a.clamp(0.0, 1.0);
+            r = r * (1.0 - w) + 255.0 * w;
+            g = g * (1.0 - w) + 255.0 * w;
+            b = b * (1.0 - w) + 255.0 * w;
+
+            // 玻璃顶棱微高光
+            let d_rim = (d_box + 1.5).abs() - 1.0;
+            if d_rim < 1.0 && (px + py) < 0.0 {
+                let rim_w = (1.0 - smooth(-0.8, 0.8, d_rim)) * 0.35;
+                r = r * (1.0 - rim_w) + 255.0 * rim_w;
+                g = g * (1.0 - rim_w) + 255.0 * rim_w;
+                b = b * (1.0 - rim_w) + 255.0 * rim_w;
+            }
+
+            img.put_pixel(
+                x,
+                y,
+                Rgba([
+                    r.round().clamp(0.0, 255.0) as u8,
+                    g.round().clamp(0.0, 255.0) as u8,
+                    b.round().clamp(0.0, 255.0) as u8,
+                    (box_a * 255.0).round().clamp(0.0, 255.0) as u8,
+                ]),
+            );
         }
     }
     let mut buf = std::io::Cursor::new(Vec::new());
@@ -217,19 +273,26 @@ fn base64_decode(s: &str) -> Result<Vec<u8>, ()> {
         table[ch as usize] = i as i8;
     }
     let clean: Vec<u8> = s.bytes().filter(|b| *b != b'\n' && *b != b'\r' && *b != b' ').collect();
+    if clean.len() % 4 != 0 {
+        return Err(());
+    }
     let mut out = Vec::with_capacity(clean.len() / 4 * 3);
     let mut i = 0;
     while i + 4 <= clean.len() {
         let a = table[clean[i] as usize];
         let b2 = table[clean[i + 1] as usize];
-        let c = table[clean[i + 2] as usize];
-        let d = table[clean[i + 3] as usize];
-        if a < 0 || b2 < 0 { return Err(()); }
-        let x = ((a as u32) << 18) | ((b2 as u32) << 12);
+        let c_pad = clean[i + 2] == b'=';
+        let d_pad = clean[i + 3] == b'=';
+        let c = if c_pad { 0 } else { table[clean[i + 2] as usize] };
+        let d = if d_pad { 0 } else { table[clean[i + 3] as usize] };
+        if a < 0 || b2 < 0 || c < 0 || d < 0 {
+            return Err(());
+        }
+        let x = ((a as u32) << 18) | ((b2 as u32) << 12) | ((c as u32) << 6) | (d as u32);
         out.push((x >> 16) as u8);
-        if clean[i + 2] != b'=' && c >= 0 {
+        if !c_pad {
             out.push(((x >> 8) & 0xff) as u8);
-            if clean[i + 3] != b'=' && d >= 0 {
+            if !d_pad {
                 out.push((x & 0xff) as u8);
             }
         }
@@ -242,6 +305,7 @@ fn base64_decode(s: &str) -> Result<Vec<u8>, ()> {
 /// 把当前设置的自定义图标应用到系统托盘/菜单栏（热更新）。无自定义则回退默认图标。
 fn apply_tray_icon(app: &AppHandle, s: &Settings) {
     let image = resolve_icon_image(app, s);
+    let is_default_template = image.is_none();
     let icon = image.unwrap_or_else(|| {
         let icon_path = app.path().resource_dir().unwrap_or_default().join("icons/tray_white.png");
         tauri::image::Image::from_path(&icon_path).unwrap_or_else(|_| {
@@ -251,6 +315,7 @@ fn apply_tray_icon(app: &AppHandle, s: &Settings) {
     });
     if let Some(tray) = app.tray_by_id("main") {
         let _ = tray.set_icon(Some(icon));
+        let _ = tray.set_icon_as_template(is_default_template);
     }
     let _ = app.tray_by_id("main").map(|t| t.set_tooltip(Some(app_title(s))));
 }
@@ -561,16 +626,16 @@ fn menu_strings(lang: &str) -> MenuStrings {
         },
         _ => MenuStrings {
             show_widget: "显示小组件".into(),
-            theme_sub: "外观".into(),
+            theme_sub: "外观设置".into(),
             theme_auto: "跟随系统".into(),
             theme_light: "浅色模式".into(),
             theme_dark: "深色模式".into(),
-            style_sub: "主题".into(),
+            style_sub: "主题风格".into(),
             style_liquid: "液态玻璃".into(),
             style_pixel: "像素动漫风".into(),
             style_brutal: "网页粗野主义".into(),
             style_term: "开发者终端".into(),
-            lang_sub: "语言".into(),
+            lang_sub: "界面语言".into(),
             lang_zh: "简体中文".into(),
             lang_en: "English".into(),
             lang_ja: "日本語".into(),
@@ -581,7 +646,7 @@ fn menu_strings(lang: &str) -> MenuStrings {
             char_nimbo: "云宝".into(),
             char_twinkle: "亮亮".into(),
             char_claw: "钳钳".into(),
-            char_random: "随机".into(),
+            char_random: "随机轮换".into(),
             refresh_sub: "更新频率".into(),
             refresh_5: "5 分钟".into(),
             refresh_15: "15 分钟".into(),
@@ -590,9 +655,9 @@ fn menu_strings(lang: &str) -> MenuStrings {
             min_unit: "分钟".into(),
             refresh_now: "立即刷新".into(),
             open_folder: "打开数据目录".into(),
-            setup_wizard: "设置…".into(),
+            setup_wizard: "设置向导…".into(),
             restart: "重新启动".into(),
-            quit: "退出".into(),
+            quit: "退出程序".into(),
         },
     }
 }
@@ -609,8 +674,12 @@ fn relaunch(app: &AppHandle) {
             .and_then(|p| p.parent())  // Contents
             .and_then(|p| p.parent())  // xxx.app
         {
-            let script = format!("sleep 1; open '{}'", bundle.display());
-            let _ = std::process::Command::new("sh").arg("-c").arg(script).spawn();
+            let _ = std::process::Command::new("sh")
+                .arg("-c")
+                .arg("sleep 1; open \"$1\"")
+                .arg("_")
+                .arg(bundle)
+                .spawn();
         }
     }
     app.exit(0);
@@ -774,6 +843,33 @@ fn apply_window_style(app: &AppHandle, style: &str) {
     }
 }
 
+/// 同步 macOS 原生窗口与底层液态玻璃/磨砂层的明暗外观（auto=跟随系统 / light=Aqua / dark=DarkAqua）。
+/// 修复手动切换深浅色时底层 NSGlassEffectView / NSVisualEffectView 仍停留在系统外观导致反差失衡的问题。
+#[cfg(target_os = "macos")]
+fn apply_window_appearance(app: &AppHandle, theme: &str) {
+    if let Some(win) = app.get_webview_window("main") {
+        if let Ok(ns) = win.ns_window() {
+            let ns = ns as *mut objc::runtime::Object;
+            unsafe {
+                let appearance: *mut objc::runtime::Object = match theme {
+                    "dark" => {
+                        let name = ns_string("NSAppearanceNameDarkAqua");
+                        msg_send![class!(NSAppearance), appearanceNamed: name]
+                    }
+                    "light" => {
+                        let name = ns_string("NSAppearanceNameAqua");
+                        msg_send![class!(NSAppearance), appearanceNamed: name]
+                    }
+                    _ => std::ptr::null_mut(),
+                };
+                let _: () = msg_send![ns, setAppearance: appearance];
+            }
+        }
+    }
+}
+#[cfg(not(target_os = "macos"))]
+fn apply_window_appearance(_app: &AppHandle, _theme: &str) {}
+
 fn disable_window_shadow(win: &tauri::WebviewWindow) {
     use objc::{msg_send, sel, sel_impl};
     if let Ok(ns) = win.ns_window() {
@@ -813,7 +909,9 @@ fn sync_main_widget(app: &AppHandle, s: &Settings) {
                 sh.set("pos_y", cy);
                 let _ = save_settings_file(app, &sh.clone_inner());
             }
+            let _ = app.emit("power-paused", false);
         } else {
+            let _ = app.emit("power-paused", true);
             let _ = win.hide();
         }
     }
@@ -891,17 +989,52 @@ fn paths(app: &AppHandle) -> (PathBuf, PathBuf, PathBuf, PathBuf) {
     (py, data, tok, cfg)
 }
 
+/// 解析完整可用的 Python 解释器路径：
+/// macOS 上优先使用系统自带的 /usr/bin/python3，避免 PATH 中损坏的第三方 Python
+/// （例如缺少 _posixsubprocess / binascii 的 ~/.linuxbrew-mac/.../python3）抢先被命中。
+fn python_bin() -> &'static str {
+    #[cfg(target_os = "windows")]
+    {
+        if std::process::Command::new("python")
+            .arg("--version")
+            .output()
+            .map(|o| o.status.success())
+            .unwrap_or(false)
+        {
+            "python"
+        } else {
+            "py"
+        }
+    }
+    #[cfg(not(target_os = "windows"))]
+    {
+        for cand in ["/usr/bin/python3", "/opt/homebrew/bin/python3", "/usr/local/bin/python3"] {
+            if Path::new(cand).exists() {
+                return cand;
+            }
+        }
+        "python3"
+    }
+}
+
 /// 运行一次 Python 采集（写 data.json）
-fn run_fetch_once(py: &Path, data: &Path, tok: &Path, cfg: &Path, sed_min: u64, remind_min: u64) -> std::io::Result<()> {
+fn run_fetch_once(
+    py: &Path,
+    data: &Path,
+    tok: &Path,
+    cfg: &Path,
+    sed_min: u64,
+    remind_min: u64,
+    notify_start: u64,
+    notify_end: u64,
+) -> std::io::Result<()> {
     if let Some(parent) = data.parent() {
         let _ = std::fs::create_dir_all(parent);
     }
-    // Windows 上 Python 启动器命令为 python（python3 不存在），Linux/macOS 为 python3
-    #[cfg(target_os = "windows")]
-    let py_cmd = if std::process::Command::new("python").arg("--version").output().map(|o| o.status.success()).unwrap_or(false) { "python" } else { "py" };
-    #[cfg(not(target_os = "windows"))]
-    let py_cmd = "python3";
+    let py_cmd = python_bin();
     let status = Command::new(py_cmd)
+        .env_remove("PYTHONHOME")
+        .env_remove("PYTHONPATH")
         .arg(py)
         .arg("--once")
         .arg("--out")
@@ -914,6 +1047,10 @@ fn run_fetch_once(py: &Path, data: &Path, tok: &Path, cfg: &Path, sed_min: u64, 
         .arg(sed_min.to_string())
         .arg("--remind-min")
         .arg(remind_min.to_string())
+        .arg("--notify-start")
+        .arg(notify_start.to_string())
+        .arg("--notify-end")
+        .arg(notify_end.to_string())
         .status()?;
     if !status.success() {
         eprintln!("[health] python fetch exited with {:?}", status.code());
@@ -1069,6 +1206,8 @@ fn dnd_set(active: bool) {
     }
 }
 
+static SCREEN_LOCKED: AtomicBool = AtomicBool::new(false);
+
 #[cfg(target_os = "macos")]
 extern "C" fn hd_dnd_enabled(_this: *mut Object, _cmd: Sel, _note: *mut Object) {
     dnd_set(true);
@@ -1076,6 +1215,30 @@ extern "C" fn hd_dnd_enabled(_this: *mut Object, _cmd: Sel, _note: *mut Object) 
 #[cfg(target_os = "macos")]
 extern "C" fn hd_dnd_disabled(_this: *mut Object, _cmd: Sel, _note: *mut Object) {
     dnd_set(false);
+}
+#[cfg(target_os = "macos")]
+extern "C" fn hd_theme_changed(_this: *mut Object, _cmd: Sel, _note: *mut Object) {
+    let dark = current_appearance_dark();
+    if let Some(h) = DND_HANDLE.get() {
+        let _ = h.emit("appearance-changed", if dark { "dark" } else { "light" });
+    }
+}
+#[cfg(target_os = "macos")]
+extern "C" fn hd_screen_locked(_this: *mut Object, _cmd: Sel, _note: *mut Object) {
+    SCREEN_LOCKED.store(true, Ordering::SeqCst);
+    eprintln!("[health] 屏幕已锁屏 → 冻结前端动画与后台采集（省电休眠）");
+    if let Some(h) = DND_HANDLE.get() {
+        let _ = h.emit("power-paused", true);
+    }
+}
+#[cfg(target_os = "macos")]
+extern "C" fn hd_screen_unlocked(_this: *mut Object, _cmd: Sel, _note: *mut Object) {
+    SCREEN_LOCKED.store(false, Ordering::SeqCst);
+    eprintln!("[health] 屏幕已解锁 → 恢复前端动画并触发数据刷新");
+    if let Some(h) = DND_HANDLE.get() {
+        let _ = h.emit("power-paused", false);
+        refresh_data(h);
+    }
 }
 
 /// 构造 NSString（不释放，进程生命周期内常驻，仅用于注册观察者时的一次性名称）
@@ -1133,10 +1296,19 @@ fn dnd_observer_main() {
         let ty = b"v@:@\0".as_ptr() as *const c_char;
         let imp_on: Imp = std::mem::transmute(hd_dnd_enabled as extern "C" fn(*mut Object, Sel, *mut Object));
         let imp_off: Imp = std::mem::transmute(hd_dnd_disabled as extern "C" fn(*mut Object, Sel, *mut Object));
+        let imp_theme: Imp = std::mem::transmute(hd_theme_changed as extern "C" fn(*mut Object, Sel, *mut Object));
+        let imp_lock: Imp = std::mem::transmute(hd_screen_locked as extern "C" fn(*mut Object, Sel, *mut Object));
+        let imp_unlock: Imp = std::mem::transmute(hd_screen_unlocked as extern "C" fn(*mut Object, Sel, *mut Object));
         let sel_on = std::ffi::CString::new("hdDndOn:").unwrap();
         let sel_off = std::ffi::CString::new("hdDndOff:").unwrap();
+        let sel_theme = std::ffi::CString::new("hdThemeChanged:").unwrap();
+        let sel_lock = std::ffi::CString::new("hdScreenLocked:").unwrap();
+        let sel_unlock = std::ffi::CString::new("hdScreenUnlocked:").unwrap();
         class_addMethod(cls, sel_registerName(sel_on.as_ptr()), imp_on, ty);
         class_addMethod(cls, sel_registerName(sel_off.as_ptr()), imp_off, ty);
+        class_addMethod(cls, sel_registerName(sel_theme.as_ptr()), imp_theme, ty);
+        class_addMethod(cls, sel_registerName(sel_lock.as_ptr()), imp_lock, ty);
+        class_addMethod(cls, sel_registerName(sel_unlock.as_ptr()), imp_unlock, ty);
         objc_registerClassPair(cls);
 
         let obs_cls = match Class::get("HdDndObserver") {
@@ -1158,13 +1330,16 @@ fn dnd_observer_main() {
         for (name, selname) in [
             ("_NSDoNotDisturbEnabledNotification", "hdDndOn:"),
             ("_NSDoNotDisturbDisabledNotification", "hdDndOff:"),
+            ("AppleInterfaceThemeChangedNotification", "hdThemeChanged:"),
+            ("com.apple.screenIsLocked", "hdScreenLocked:"),
+            ("com.apple.screenIsUnlocked", "hdScreenUnlocked:"),
         ] {
             let n = ns_string(name);
             let s = std::ffi::CString::new(selname).unwrap();
             let sel = sel_registerName(s.as_ptr());
             let _: () = msg_send![center, addObserver: observer selector: sel name: n object: nil_obj];
         }
-        eprintln!("[health] DND 观察者已注册：监听系统勿扰广播（无需权限）");
+        eprintln!("[health] DND / 外观 / 锁屏省电观察者已注册");
 
         // 分布式通知靠 run loop 投递，线程必须保持 run loop 运行
         let rl: *mut Object = match Class::get("NSRunLoop") {
@@ -1206,7 +1381,15 @@ fn set_autostart(enabled: bool) -> std::io::Result<()> {
 
     #[cfg(target_os = "macos")]
     {
-    let app_path = "/Applications/Health Dashboard.app";
+    let detected_bundle = std::env::current_exe().ok().and_then(|exe| {
+        exe.parent()
+            .and_then(|p| p.parent())
+            .and_then(|p| p.parent())
+            .filter(|p| p.extension().and_then(|e| e.to_str()) == Some("app"))
+            .map(|p| p.to_string_lossy().into_owned())
+    });
+    let app_path = detected_bundle.unwrap_or_else(|| "/Applications/Health Dashboard.app".to_string());
+    let escaped_app_path = app_path.replace('\\', "\\\\").replace('"', "\\\"");
 
     // 先清理旧的 LaunchAgent plist（已废弃，改用 System Events）
     let old_plist = {
@@ -1217,9 +1400,11 @@ fn set_autostart(enabled: bool) -> std::io::Result<()> {
             .join("com.arrhealth.healthdashboard.plist")
     };
     if old_plist.exists() {
-        let _ = Command::new("/bin/launchctl")
-            .args(["unload", old_plist.to_str().unwrap()])
-            .status();
+        if let Some(p) = old_plist.to_str() {
+            let _ = Command::new("/bin/launchctl")
+                .args(["unload", p])
+                .status();
+        }
         let _ = std::fs::remove_file(&old_plist);
     }
 
@@ -1233,7 +1418,7 @@ end try"#;
         // 再添加
         let add_script = format!(
             r#"tell application "System Events" to make login item at end with properties {{path:"{}", hidden:true}}"#,
-            app_path,
+            escaped_app_path,
         );
         let status = Command::new("osascript").args(["-e", &add_script]).status()?;
         if !status.success() {
@@ -1303,12 +1488,12 @@ fn ai_chat_blocking(
     let body = serde_json::json!({
         "model": model,
         "messages": msgs,
-        "temperature": 0.9,
+        "temperature": 1.0,
         "max_tokens": if max_tokens > 0 { max_tokens } else { 1024 },
     })
     .to_string();
 
-    let out = std::process::Command::new("curl")
+    let mut child = std::process::Command::new("curl")
         .arg("-s")
         .arg("--connect-timeout")
         .arg("5")
@@ -1323,12 +1508,25 @@ fn ai_chat_blocking(
         .arg(&url)
         .arg("-H")
         .arg("Content-Type: application/json")
-        .arg("-H")
-        .arg(format!("Authorization: Bearer {}", api_key))
+        // 通过 stdin (-K -) 传 Authorization 头，避免 API Key 暴露在 ps 进程参数中
+        .arg("-K")
+        .arg("-")
         .arg("--data-binary")
         .arg(&body)
-        .output()
+        .stdin(std::process::Stdio::piped())
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped())
+        .spawn()
         .map_err(|e| format!("curl 启动失败: {}", e))?;
+
+    if let Some(mut stdin) = child.stdin.take() {
+        let safe_key = api_key.replace('\\', "\\\\").replace('"', "\\\"").replace(['\r', '\n'], "");
+        let cfg_line = format!("header = \"Authorization: Bearer {}\"\n", safe_key);
+        let _ = stdin.write_all(cfg_line.as_bytes());
+    }
+    let out = child
+        .wait_with_output()
+        .map_err(|e| format!("curl 等待失败: {}", e))?;
 
     if !out.status.success() {
         let code = out.status.code().unwrap_or(-1);
@@ -1340,17 +1538,44 @@ fn ai_chat_blocking(
     Ok(resp)
 }
 
-/// 非阻塞刷新：后台线程跑 Python 采集，立即返回。
+/// 原子写入文件：先写同目录临时文件再 rename，防止并发读写出现半写残缺 JSON
+fn atomic_write(path: &Path, content: &[u8]) -> std::io::Result<()> {
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent)?;
+    }
+    let tmp = path.with_extension(format!(
+        "tmp.{}.{}",
+        std::process::id(),
+        chrono::Utc::now().timestamp_nanos_opt().unwrap_or(0)
+    ));
+    std::fs::write(&tmp, content)?;
+    std::fs::rename(&tmp, path)
+}
+
+static REFRESHING: AtomicBool = AtomicBool::new(false);
+
+/// 非阻塞刷新：后台线程跑 Python 采集，立即返回（带防重入锁避免并发覆盖 data.json）。
 fn refresh_data(app: &AppHandle) {
+    if REFRESHING.swap(true, Ordering::SeqCst) {
+        return;
+    }
     let app = app.clone();
     std::thread::spawn(move || {
+        struct ResetGuard;
+        impl Drop for ResetGuard {
+            fn drop(&mut self) {
+                REFRESHING.store(false, Ordering::SeqCst);
+            }
+        }
+        let _guard = ResetGuard;
         let (py, data, tok, cfg) = paths(&app);
-        let (sed_min, remind_min) = {
+        let (sed_min, remind_min, notify_start, notify_end) = {
             let sh = app.state::<SettingsHandle>();
             let g = sh.0.lock().unwrap();
-            (g.sedentary_min, g.sedentary_remind_min)
+            (g.sedentary_min, g.sedentary_remind_min, g.notify_start_hour, g.notify_end_hour)
         };
-        let _ = run_fetch_once(&py, &data, &tok, &cfg, sed_min, remind_min);
+        let _ = run_fetch_once(&py, &data, &tok, &cfg, sed_min, remind_min, notify_start, notify_end);
+        let _ = app.emit("data-updated", ());
     });
 }
 
@@ -1370,7 +1595,9 @@ async fn test_data_api(app: AppHandle) -> Result<String, String> {
 /// 注意：只能在非主线程调用（HTTP handler 跑在独立线程，安全；command 侧用 spawn_blocking 包一层）。
 fn data_api_ping_blocking(app: &AppHandle) -> Result<String, String> {
     let (py, _data, tok, cfg) = paths(app);
-    let out = std::process::Command::new("python3")
+    let out = std::process::Command::new(python_bin())
+        .env_remove("PYTHONHOME")
+        .env_remove("PYTHONPATH")
         .arg(py)
         .arg("--ping")
         .arg("--token")
@@ -1476,7 +1703,9 @@ fn reset_sedentary(app: AppHandle) -> Result<(), String> {
         t["last_remind_time"] = serde_json::Value::Number(now_ms.into());
     }
 
-    std::fs::write(&data, serde_json::to_string_pretty(&v).unwrap()).map_err(|e| e.to_string())
+    atomic_write(&data, serde_json::to_string_pretty(&v).unwrap().as_bytes()).map_err(|e| e.to_string())?;
+    let _ = app.emit("data-updated", ());
+    Ok(())
 }
 
 /// 用户点"稍后"：设置 snooze_until，让菜单栏弹窗与小组件弹窗共享同一份抑制状态。
@@ -1499,7 +1728,9 @@ fn snooze_sedentary(app: AppHandle, minutes: u64) -> Result<(), String> {
     if let Some(t) = v.get_mut("today") {
         t["snooze_until"] = serde_json::Value::Number(until.into());
     }
-    std::fs::write(&data, serde_json::to_string_pretty(&v).unwrap()).map_err(|e| e.to_string())
+    atomic_write(&data, serde_json::to_string_pretty(&v).unwrap().as_bytes()).map_err(|e| e.to_string())?;
+    let _ = app.emit("data-updated", ());
+    Ok(())
 }
 
 #[tauri::command]
@@ -1511,9 +1742,16 @@ fn get_settings(app: AppHandle) -> String {
 fn save_settings(app: AppHandle, json: String) -> Result<(), String> {
     let s: Settings = serde_json::from_str(&json).map_err(|e| e.to_string())?;
     save_settings_file(&app, &s).map_err(|e| e.to_string())?;
+    // 同步内存态 SettingsHandle，否则菜单栏勾选态滞后且下次菜单点击会回滚刚保存的设置
+    if let Some(sh) = app.try_state::<SettingsHandle>() {
+        *sh.0.lock().unwrap() = s.clone();
+    }
     if let Some(state) = app.try_state::<RefreshState>() {
         *state.0.lock().unwrap() = s.refresh_interval_min.max(1) * 60;
     }
+    apply_window_appearance(&app, &s.theme);
+    #[cfg(target_os = "macos")]
+    apply_window_style(&app, &s.style);
     // 仅在用户摆放过位置时才复位：否则会把小组件甩回默认的 (20, 60)
     if s.pos_saved {
         if let Some(win) = app.get_webview_window("main") {
@@ -1817,6 +2055,10 @@ fn toggle_autostart_setting(app: AppHandle, enabled: bool) -> Result<(), String>
 /// 在默认浏览器中打开外部设置引导页（Google 授权 / AI 配置等）
 #[tauri::command]
 fn open_external(url: String) -> Result<(), String> {
+    let lower = url.trim().to_ascii_lowercase();
+    if !(lower.starts_with("http://") || lower.starts_with("https://")) {
+        return Err("仅允许打开 http:// 或 https:// 链接".to_string());
+    }
     #[cfg(target_os = "macos")]
     {
         std::process::Command::new("open").arg(&url).spawn().map_err(|e| e.to_string())?;
@@ -1843,10 +2085,32 @@ fn open_setup_wizard_cmd(app: AppHandle) -> Result<(), String> {
 
 // ── 设置向导：本地 HTTP 服务（浏览器填写并保存，回写 App）────────────────────
 const SETUP_SERVER_PORT: u16 = 18911;
+const SETUP_MAX_BODY_BYTES: usize = 5 * 1024 * 1024; // 5MB 上限，防畸形大请求 OOM
 static SETUP_SERVER_STARTED: OnceLock<()> = OnceLock::new();
+static SETUP_SESSION_TOKEN: OnceLock<String> = OnceLock::new();
+
+/// 进程级随机 token，用于防跨站网页通过 localhost 窃取凭据或篡改设置
+fn setup_session_token() -> &'static str {
+    SETUP_SESSION_TOKEN
+        .get_or_init(|| {
+            let mut buf = [0u8; 16];
+            let ok = std::fs::File::open("/dev/urandom")
+                .and_then(|mut f| f.read_exact(&mut buf))
+                .is_ok();
+            if !ok {
+                let nanos = chrono::Utc::now().timestamp_nanos_opt().unwrap_or(0) as u128;
+                let pid = std::process::id() as u128;
+                let mixed = nanos ^ (pid << 64) ^ 0x9e37_79b9_7f4a_7c15_u128;
+                buf = mixed.to_le_bytes();
+            }
+            buf.iter().map(|b| format!("{:02x}", b)).collect()
+        })
+        .as_str()
+}
 
 /// 确保本地向导服务只启动一次（绑定 127.0.0.1:18911），随后打开浏览器
 fn ensure_setup_server(app: AppHandle) {
+    let _ = setup_session_token();
     SETUP_SERVER_STARTED.get_or_init(|| {
         std::thread::spawn(move || {
             if let Ok(listener) = TcpListener::bind(("127.0.0.1", SETUP_SERVER_PORT)) {
@@ -1869,6 +2133,26 @@ fn ensure_setup_server(app: AppHandle) {
     });
 }
 
+/// 校验本地 API 请求的 Host / Origin / Sec-Fetch-Site 与 X-Setup-Token，防止外部网页窃取凭据或 CSRF
+fn is_allowed_setup_api(host: &str, origin: &str, fetch_site: &str, token: &str) -> bool {
+    let expected_h1 = format!("127.0.0.1:{}", SETUP_SERVER_PORT);
+    let expected_h2 = format!("localhost:{}", SETUP_SERVER_PORT);
+    if !host.is_empty() && host != expected_h1 && host != expected_h2 {
+        return false;
+    }
+    if !origin.is_empty() {
+        let ok_o1 = format!("http://127.0.0.1:{}", SETUP_SERVER_PORT);
+        let ok_o2 = format!("http://localhost:{}", SETUP_SERVER_PORT);
+        if origin != ok_o1 && origin != ok_o2 {
+            return false;
+        }
+    }
+    if !fetch_site.is_empty() && fetch_site != "same-origin" && fetch_site != "none" {
+        return false;
+    }
+    token == setup_session_token()
+}
+
 /// 处理单个 HTTP 连接：GET /setup 返回向导页，POST /api/save 回写设置，GET /api/load 预填
 fn handle_setup_conn(mut stream: TcpStream, app: &AppHandle) {
     stream.set_read_timeout(Some(std::time::Duration::from_secs(5))).ok();
@@ -1885,18 +2169,42 @@ fn handle_setup_conn(mut stream: TcpStream, app: &AppHandle) {
     let path = parts[1];
 
     let mut content_length = 0usize;
+    let mut host = String::new();
+    let mut origin = String::new();
+    let mut fetch_site = String::new();
+    let mut req_token = String::new();
     loop {
         let mut h = String::new();
         let hn = match reader.read_line(&mut h) { Ok(n) => n, Err(_) => break };
         if hn == 0 { break; }
-        if h == "\r\n" { break; }
-        if let Some(v) = h.to_ascii_lowercase().strip_prefix("content-length:") {
+        if h == "\r\n" || h == "\n" { break; }
+        let lower = h.to_ascii_lowercase();
+        if let Some(v) = lower.strip_prefix("content-length:") {
             content_length = v.trim().parse().unwrap_or(0);
+        } else if let Some(v) = lower.strip_prefix("host:") {
+            host = v.trim().to_string();
+        } else if let Some(v) = lower.strip_prefix("origin:") {
+            origin = v.trim().to_string();
+        } else if let Some(v) = lower.strip_prefix("sec-fetch-site:") {
+            fetch_site = v.trim().to_string();
+        } else if lower.starts_with("x-setup-token:") {
+            if let Some((_, val)) = h.split_once(':') {
+                req_token = val.trim().to_string();
+            }
         }
+    }
+    if content_length > SETUP_MAX_BODY_BYTES {
+        send_http(&mut stream, 413, "text/plain; charset=utf-8", b"Payload Too Large");
+        return;
     }
     let mut body = vec![0u8; content_length];
     if content_length > 0 {
         if reader.read_exact(&mut body).is_err() { body.clear(); }
+    }
+
+    if path.starts_with("/api/") && !is_allowed_setup_api(&host, &origin, &fetch_site, &req_token) {
+        send_http(&mut stream, 403, "application/json; charset=utf-8", br#"{"ok":false,"error":"forbidden"}"#);
+        return;
     }
 
     if method == "POST" && path.starts_with("/api/save") {
@@ -1904,12 +2212,16 @@ fn handle_setup_conn(mut stream: TcpStream, app: &AppHandle) {
         send_http(&mut stream, 200, "application/json; charset=utf-8", resp.as_bytes());
     } else if method == "GET" && path.starts_with("/api/load") {
         let s = load_settings(app);
+        // 注意：第 3 步「外观与标识」要回填 app_name / custom_icon，
+        // 之前漏了这两个字段，导致向导里的外观设置永远是空的。
         let out = serde_json::json!({
             "google_client_id": s.google_client_id,
             "google_client_secret": s.google_client_secret,
             "llm_base_url": s.llm_base_url,
             "llm_api_key": s.llm_api_key,
             "llm_model": s.llm_model,
+            "app_name": s.app_name,
+            "custom_icon": s.custom_icon,
         });
         let j = serde_json::to_string(&out).unwrap_or_else(|_| " {}".to_string());
         send_http(&mut stream, 200, "application/json; charset=utf-8", j.as_bytes());
@@ -1931,12 +2243,231 @@ fn handle_setup_conn(mut stream: TcpStream, app: &AppHandle) {
             Err(e) => serde_json::json!({"ok": false, "ms": 0, "detail": e}).to_string(),
         };
         send_http(&mut stream, 200, "application/json; charset=utf-8", resp.as_bytes());
+    } else if method == "GET" && path.starts_with("/oauth/start") {
+        handle_oauth_start(&mut stream, path, app);
+    } else if method == "GET" && path.starts_with("/oauth/callback") {
+        handle_oauth_callback(&mut stream, path, app);
     } else if path.starts_with("/setup") || path == "/" || path.starts_with("/index") {
         let html = load_setup_html(app);
         send_http(&mut stream, 200, "text/html; charset=utf-8", html.as_bytes());
     } else {
         send_http(&mut stream, 404, "text/plain; charset=utf-8", b"Not Found");
     }
+}
+
+fn url_encode(s: &str) -> String {
+    let mut out = String::new();
+    for b in s.bytes() {
+        match b {
+            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'_' | b'.' | b'~' => out.push(b as char),
+            _ => out.push_str(&format!("%{:02X}", b)),
+        }
+    }
+    out
+}
+
+fn url_decode(s: &str) -> String {
+    let mut bytes = Vec::with_capacity(s.len());
+    let raw = s.as_bytes();
+    let mut i = 0;
+    while i < raw.len() {
+        if raw[i] == b'+' {
+            bytes.push(b' ');
+            i += 1;
+        } else if raw[i] == b'%' && i + 2 < raw.len() {
+            if let Ok(hex) = std::str::from_utf8(&raw[i + 1..i + 3]) {
+                if let Ok(v) = u8::from_str_radix(hex, 16) {
+                    bytes.push(v);
+                    i += 3;
+                    continue;
+                }
+            }
+            bytes.push(raw[i]);
+            i += 1;
+        } else {
+            bytes.push(raw[i]);
+            i += 1;
+        }
+    }
+    String::from_utf8_lossy(&bytes).into_owned()
+}
+
+fn parse_query_param(path: &str, key: &str) -> Option<String> {
+    let q = path.split_once('?')?.1;
+    for pair in q.split('&') {
+        if let Some((k, v)) = pair.split_once('=') {
+            if k == key {
+                return Some(url_decode(v));
+            }
+        }
+    }
+    None
+}
+
+/// 发起 Google OAuth 2.0 浏览器授权跳转
+fn handle_oauth_start(stream: &mut TcpStream, path: &str, app: &AppHandle) {
+    let tok = parse_query_param(path, "token").unwrap_or_default();
+    if tok != setup_session_token() {
+        send_http(stream, 403, "text/plain; charset=utf-8", b"Forbidden: invalid setup token");
+        return;
+    }
+    let s = load_settings(app);
+    let mut cid = s.google_client_id.trim().to_string();
+    if cid.is_empty() {
+        if let Ok(home) = app.path().home_dir() {
+            let cfg_p = home.join(".google-health-mcp").join("config.json");
+            if let Ok(raw) = std::fs::read_to_string(&cfg_p) {
+                if let Ok(v) = serde_json::from_str::<serde_json::Value>(&raw) {
+                    cid = v.get("GOOGLE_HEALTH_CLIENT_ID").and_then(|x| x.as_str()).unwrap_or("").trim().to_string();
+                }
+            }
+        }
+    }
+    if cid.is_empty() {
+        let html = "<!doctype html><meta charset=utf-8><body style='background:#111;color:#fff;font-family:sans-serif;padding:32px;text-align:center'><h3>请先填写并保存 Client ID 与 Client Secret</h3></body>";
+        send_http(stream, 200, "text/html; charset=utf-8", html.as_bytes());
+        return;
+    }
+    let redirect_uri = format!("http://127.0.0.1:{}/oauth/callback", SETUP_SERVER_PORT);
+    let scopes = [
+        "https://www.googleapis.com/auth/googlehealth.settings.readonly",
+        "https://www.googleapis.com/auth/googlehealth.sleep.readonly",
+        "https://www.googleapis.com/auth/googlehealth.health_metrics_and_measurements.readonly",
+        "https://www.googleapis.com/auth/googlehealth.activity_and_fitness.readonly",
+        "https://www.googleapis.com/auth/googlehealth.nutrition.readonly",
+        "https://www.googleapis.com/auth/googlehealth.profile.readonly",
+    ].join(" ");
+    let auth_url = format!(
+        "https://accounts.google.com/o/oauth2/v2/auth?client_id={}&redirect_uri={}&response_type=code&scope={}&access_type=offline&prompt=consent&state={}",
+        url_encode(&cid),
+        url_encode(&redirect_uri),
+        url_encode(&scopes),
+        url_encode(setup_session_token())
+    );
+    let header = format!(
+        "HTTP/1.1 302 Found\r\nLocation: {}\r\nContent-Length: 0\r\nConnection: close\r\n\r\n",
+        auth_url
+    );
+    let _ = stream.write_all(header.as_bytes());
+}
+
+/// 接收 Google OAuth 2.0 回调并换取 tokens.json
+fn handle_oauth_callback(stream: &mut TcpStream, path: &str, app: &AppHandle) {
+    let state = parse_query_param(path, "state").unwrap_or_default();
+    if state != setup_session_token() {
+        send_http(stream, 403, "text/plain; charset=utf-8", b"Forbidden: invalid OAuth state");
+        return;
+    }
+    if let Some(err) = parse_query_param(path, "error") {
+        let html = format!(
+            "<!doctype html><meta charset=utf-8><body style='background:#111;color:#ff453a;font-family:-apple-system,sans-serif;padding:36px;text-align:center'><h2>授权已取消或失败</h2><p>{}</p></body>",
+            err
+        );
+        send_http(stream, 200, "text/html; charset=utf-8", html.as_bytes());
+        return;
+    }
+    let code = match parse_query_param(path, "code") {
+        Some(c) if !c.is_empty() => c,
+        _ => {
+            send_http(stream, 400, "text/plain; charset=utf-8", b"Missing authorization code");
+            return;
+        }
+    };
+    let s = load_settings(app);
+    let mut cid = s.google_client_id.trim().to_string();
+    let mut csec = s.google_client_secret.trim().to_string();
+    let home = match app.path().home_dir() {
+        Ok(h) => h,
+        Err(_) => {
+            send_http(stream, 500, "text/plain; charset=utf-8", b"Missing home_dir");
+            return;
+        }
+    };
+    let mcp_dir = home.join(".google-health-mcp");
+    if cid.is_empty() || csec.is_empty() {
+        if let Ok(raw) = std::fs::read_to_string(mcp_dir.join("config.json")) {
+            if let Ok(v) = serde_json::from_str::<serde_json::Value>(&raw) {
+                if cid.is_empty() {
+                    cid = v.get("GOOGLE_HEALTH_CLIENT_ID").and_then(|x| x.as_str()).unwrap_or("").trim().to_string();
+                }
+                if csec.is_empty() {
+                    csec = v.get("GOOGLE_HEALTH_CLIENT_SECRET").and_then(|x| x.as_str()).unwrap_or("").trim().to_string();
+                }
+            }
+        }
+    }
+    let redirect_uri = format!("http://127.0.0.1:{}/oauth/callback", SETUP_SERVER_PORT);
+    let form = format!(
+        "code={}&client_id={}&client_secret={}&redirect_uri={}&grant_type=authorization_code",
+        url_encode(&code),
+        url_encode(&cid),
+        url_encode(&csec),
+        url_encode(&redirect_uri)
+    );
+    let mut child = match Command::new("curl")
+        .args(["-s", "--max-time", "30", "-X", "POST", "https://oauth2.googleapis.com/token", "--data-binary", "@-"])
+        .stdin(std::process::Stdio::piped())
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped())
+        .spawn()
+    {
+        Ok(c) => c,
+        Err(e) => {
+            let msg = format!("curl failed: {}", e);
+            send_http(stream, 500, "text/plain; charset=utf-8", msg.as_bytes());
+            return;
+        }
+    };
+    if let Some(mut stdin) = child.stdin.take() {
+        let _ = stdin.write_all(form.as_bytes());
+    }
+    let out = match child.wait_with_output() {
+        Ok(o) => o,
+        Err(e) => {
+            let msg = format!("curl wait failed: {}", e);
+            send_http(stream, 500, "text/plain; charset=utf-8", msg.as_bytes());
+            return;
+        }
+    };
+    let resp_str = String::from_utf8_lossy(&out.stdout).to_string();
+    let mut tok_json: serde_json::Value = serde_json::from_str(&resp_str).unwrap_or(serde_json::json!({}));
+    if tok_json.get("access_token").and_then(|x| x.as_str()).is_none() {
+        let html = format!(
+            "<!doctype html><meta charset=utf-8><body style='background:#111;color:#ff453a;font-family:-apple-system,sans-serif;padding:36px;text-align:center'><h2>换取 Token 失败</h2><pre style='color:#ccc;white-space:pre-wrap;font-size:12px'>{}</pre><p style='color:#888;font-size:12px'>请确认 Google Cloud Console 的 OAuth 客户端已允许重定向 URI http://127.0.0.1:18911/oauth/callback（桌面应用类型默认允许任意 localhost 端口）。</p></body>",
+            resp_str
+        );
+        send_http(stream, 200, "text/html; charset=utf-8", html.as_bytes());
+        return;
+    }
+    let expires_in = tok_json.get("expires_in").and_then(|x| x.as_i64()).unwrap_or(3600);
+    let expires_at = chrono::Utc::now().timestamp() + expires_in;
+    tok_json["expires_at"] = serde_json::Value::Number(expires_at.into());
+    // 若本次未返回新的 refresh_token，保留旧文件中的 refresh_token
+    let tok_path = mcp_dir.join("tokens.json");
+    if tok_json.get("refresh_token").is_none() {
+        if let Ok(old_raw) = std::fs::read_to_string(&tok_path) {
+            if let Ok(old_v) = serde_json::from_str::<serde_json::Value>(&old_raw) {
+                if let Some(rt) = old_v.get("refresh_token") {
+                    tok_json["refresh_token"] = rt.clone();
+                }
+            }
+        }
+    }
+    let _ = atomic_write(&tok_path, serde_json::to_string_pretty(&tok_json).unwrap_or_default().as_bytes());
+    // 立即触发一次后台数据采集
+    refresh_data(app);
+
+    let ok_html = r#"<!doctype html><meta charset="utf-8"><title>授权成功</title>
+<body style="background:#000;color:#fff;font-family:-apple-system,sans-serif;display:flex;flex-direction:column;align-items:center;justify-content:center;height:100vh;margin:0">
+  <div style="width:56px;height:56px;border-radius:50%;background:rgba(48,209,88,0.16);display:flex;align-items:center;justify-content:center;margin-bottom:16px;color:#30d158;font-size:28px">✓</div>
+  <h2 style="margin:0 0 8px;font-size:20px">Google 健康账号授权成功</h2>
+  <p style="margin:0;color:rgba(235,235,245,0.6);font-size:13px">凭证已保存到本机，正在同步最新健康数据，本窗口将自动关闭…</p>
+  <script>
+    try { if (window.opener) window.opener.postMessage({ type: 'oauth-success' }, window.location.origin); } catch (e) {}
+    setTimeout(function () { window.close(); }, 1400);
+  </script>
+</body>"#;
+    send_http(stream, 200, "text/html; charset=utf-8", ok_html.as_bytes());
 }
 
 /// 回写设置：settings.json（llm/google 字段）+ ~/.google-health-mcp/config.json（合并保留 token）
@@ -1996,15 +2527,33 @@ fn setup_save(body: &[u8], app: &AppHandle) -> String {
 fn load_setup_html(app: &AppHandle) -> String {
     if let Ok(rd) = app.path().resource_dir() {
         let p = rd.join("resources").join("setup.html");
-        if let Ok(s) = std::fs::read_to_string(&p) { return s; }
+        if let Ok(s) = std::fs::read_to_string(&p) {
+            let meta = format!("<meta name=\"setup-token\" content=\"{}\">", setup_session_token());
+            if let Some(pos) = s.find("</head>") {
+                let mut out = String::with_capacity(s.len() + meta.len() + 1);
+                out.push_str(&s[..pos]);
+                out.push_str(&meta);
+                out.push('\n');
+                out.push_str(&s[pos..]);
+                return out;
+            }
+            return s;
+        }
     }
     "<!doctype html><meta charset=utf-8><body style='font-family:sans-serif;padding:24px'>\n<h2>setup.html 未找到</h2><p>请确认已打包 resources/setup.html。</p></body>".to_string()
 }
 
 fn send_http(stream: &mut TcpStream, status: u16, content_type: &str, body: &[u8]) {
+    let reason = match status {
+        200 => "OK",
+        403 => "Forbidden",
+        404 => "Not Found",
+        413 => "Payload Too Large",
+        _ => "Error",
+    };
     let header = format!(
-        "HTTP/1.1 {} OK\r\nContent-Type: {}\r\nContent-Length: {}\r\nConnection: close\r\nAccess-Control-Allow-Origin: *\r\n\r\n",
-        status, content_type, body.len()
+        "HTTP/1.1 {} {}\r\nContent-Type: {}\r\nContent-Length: {}\r\nConnection: close\r\nCache-Control: no-store\r\n\r\n",
+        status, reason, content_type, body.len()
     );
     let _ = stream.write_all(header.as_bytes());
     let _ = stream.write_all(body);
@@ -2051,7 +2600,7 @@ fn list_displays() -> String {
 #[tauri::command]
 fn set_position(app: AppHandle, _display_id: i32, x: i32, y: i32) -> Result<String, String> {
     if let Some(win) = app.get_webview_window("main") {
-        let _ = win.set_position(tauri::PhysicalPosition::new(x, y));
+        let _ = win.set_position(tauri::LogicalPosition::new(x as f64, y as f64));
     }
     Ok(format!("moved to absolute ({},{})", x, y))
 }
@@ -2101,7 +2650,6 @@ fn main() {
             // macOS：桌面小组件窗口
             #[cfg(target_os = "macos")]
             if let Some(win) = app.get_webview_window("main") {
-                use cocoa::foundation::NSRect;
                 use objc::{class, msg_send, sel, sel_impl};
                 use objc::runtime::{Object, YES as YES_BOOL};
                 unsafe {
@@ -2192,8 +2740,9 @@ fn main() {
                     }
                     }
                 }
-                // vibrancy 挂载后再清理一次窗口阴影
+                // vibrancy 挂载后再清理一次窗口阴影并同步明暗外观
                 disable_window_shadow(&win);
+                apply_window_appearance(app.handle(), &settings.theme);
             }
 
             // Windows：Acrylic 磨砂 + 常驻桌面（Windows 没有 NSWindow 桌面层级 API，
@@ -2287,7 +2836,9 @@ fn main() {
                 let resource_dir = app.path().resource_dir().unwrap_or_default();
                 eprintln!("[health] resource_dir: {:?}", resource_dir);
 
-                let icon = resolve_icon_image(app.handle(), &settings).unwrap_or_else(|| {
+                let custom_img = resolve_icon_image(app.handle(), &settings);
+                let is_default_template = custom_img.is_none();
+                let icon = custom_img.unwrap_or_else(|| {
                     let icon_path = resource_dir.join("icons/tray_white.png");
                     eprintln!("[health] icon_path: {:?}", icon_path);
                     Image::from_path(&icon_path).unwrap_or_else(|e| {
@@ -2300,6 +2851,7 @@ fn main() {
                 let tray_app = app.handle().clone(); // separate clone for closure
                 let _tray = TrayIconBuilder::with_id("main")
                     .icon(icon)
+                    .icon_as_template(is_default_template)
                     .tooltip(app_title(&settings))
                     .on_tray_icon_event(move |_tray, event| {
                         if let tauri::tray::TrayIconEvent::Click {
@@ -2343,9 +2895,9 @@ fn main() {
                                 let _ = std::process::Command::new("xdg-open").arg(&dir).spawn();
                             }
                             // ── 主题 ──
-                            "theme_auto"  => { radio("theme", "theme_auto");  sh.set("theme", "auto");  s_changed = true; }
-                            "theme_light" => { radio("theme", "theme_light"); sh.set("theme", "light"); s_changed = true; }
-                            "theme_dark"  => { radio("theme", "theme_dark");  sh.set("theme", "dark");  s_changed = true; }
+                            "theme_auto"  => { radio("theme", "theme_auto");  sh.set("theme", "auto");  apply_window_appearance(app, "auto");  s_changed = true; }
+                            "theme_light" => { radio("theme", "theme_light"); sh.set("theme", "light"); apply_window_appearance(app, "light"); s_changed = true; }
+                            "theme_dark"  => { radio("theme", "theme_dark");  sh.set("theme", "dark");  apply_window_appearance(app, "dark");  s_changed = true; }
                             // ── 主题（仅换皮肤：液态玻璃 / 像素动漫风）──
                             "style_liquid" => { radio("style", "style_liquid"); sh.set("style", "liquid-glass"); apply_window_style(app, "liquid-glass"); s_changed = true; }
                             "style_pixel"  => { radio("style", "style_pixel");  sh.set("style", "pixel-anime");  apply_window_style(app, "pixel-anime");  s_changed = true; }
@@ -2375,6 +2927,7 @@ fn main() {
                             "toggle_autostart" => {
                                 let cur = sh.0.lock().unwrap().autostart;
                                 sh.set("autostart", !cur); s_changed = true;
+                                let _ = set_autostart(!cur);
                                 if let Some(ref it) = *items_state.0.lock().unwrap() { let _ = it.autostart.set_checked(!cur); }
                             }
                             // ── 跟随系统勿扰（专注模式时静默久坐提醒）──
@@ -2417,35 +2970,27 @@ fn main() {
                 eprintln!("[health] TrayIcon built OK");
             }
 
-            // 外观监控线程：检测系统明暗变化，变化时广播 appearance-changed
+            // 启动时广播一次当前系统明暗外观；后续外观变化由 NSDistributedNotificationCenter
+            // 的 AppleInterfaceThemeChangedNotification 零延迟推送（不再起 2s 轮询线程）
             let handle = app.handle().clone();
             let init_dark = current_appearance_dark();
             let _ = handle.emit("appearance-changed", if init_dark { "dark" } else { "light" });
-            std::thread::spawn(move || {
-                let mut last: Option<bool> = Some(init_dark);
-                loop {
-                    let dark = current_appearance_dark();
-                    let changed = last.map_or(true, |l| l != dark);
-                    if changed {
-                        last = Some(dark);
-                        let _ = handle.emit("appearance-changed", if dark { "dark" } else { "light" });
-                    }
-                    std::thread::sleep(Duration::from_secs(2));
-                }
-            });
 
-            // 常驻采集线程（间隔来自 settings，可被 save_settings 热更新）
+            // 常驻采集线程（间隔来自 settings，可被 save_settings 热更新；锁屏期间自动休眠跳过）
             let setup_handle = app.handle().clone();
             let handle = setup_handle.clone();
             std::thread::spawn(move || loop {
-                let (py, data, tok, cfg) = paths(&handle);
-                // 久坐阈值/提醒间隔每次采集前读最新设置，改设置立即生效
-                let (sed_min, remind_min) = {
-                    let sh = handle.state::<SettingsHandle>();
-                    let g = sh.0.lock().unwrap();
-                    (g.sedentary_min, g.sedentary_remind_min)
-                };
-                let _ = run_fetch_once(&py, &data, &tok, &cfg, sed_min, remind_min);
+                if !SCREEN_LOCKED.load(Ordering::SeqCst) {
+                    let (py, data, tok, cfg) = paths(&handle);
+                    // 久坐阈值/提醒间隔/提醒时段每次采集前读最新设置，改设置立即生效
+                    let (sed_min, remind_min, notify_start, notify_end) = {
+                        let sh = handle.state::<SettingsHandle>();
+                        let g = sh.0.lock().unwrap();
+                        (g.sedentary_min, g.sedentary_remind_min, g.notify_start_hour, g.notify_end_hour)
+                    };
+                    let _ = run_fetch_once(&py, &data, &tok, &cfg, sed_min, remind_min, notify_start, notify_end);
+                    let _ = handle.emit("data-updated", ());
+                }
                 let secs = {
                     let state = handle.try_state::<RefreshState>();
                     match state {

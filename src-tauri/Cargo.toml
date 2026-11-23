@@ -1,9 +1,9 @@
 [package]
 name = "health-dashboard-tauri"
-version = "1.0.0"
+version = "3.0.0"
 description = "跨平台健康仪表盘小组件 (Tauri + Google Health)"
 edition = "2021"
-rust-version = "1.77"
+rust-version = "1.88"
 
 # objc 0.2 老 crate 内部使用 #[cfg(feature = "cargo-clippy")]，需声明该 feature 避免 unexpected_cfgs 警告
 [features]

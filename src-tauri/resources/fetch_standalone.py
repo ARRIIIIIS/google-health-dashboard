@@ -4,7 +4,8 @@ Google Health API 数据采集脚本
 使用 curl 直连，绕过 MCP 层
 API 文档：https://developers.google.com/health/android/reference/rest/v4
 """
-import json, subprocess, sys, re, time, urllib.parse, random, os, shutil, argparse
+import json, subprocess, sys, re, time, urllib.parse, random, os, shutil, argparse, threading
+from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timedelta
 
 # 提示文本中剥离 emoji / 装饰符号（小组件系统字体无法渲染，会显示成 □）
@@ -37,15 +38,26 @@ _ARGV.add_argument("--ping",   action="store_true", help="轻量探测：只测 
 _ARGV.add_argument("--loop",   action="store_true")
 _ARGV.add_argument("--sed-min",    type=int, default=45, help="连续不动超过此时长(分钟)判定久坐")
 _ARGV.add_argument("--remind-min", type=int, default=30, help="久坐后每隔多久复查提醒一次(分钟)")
+_ARGV.add_argument("--notify-start", type=int, default=9, help="久坐提醒开始小时(0-23)")
+_ARGV.add_argument("--notify-end",   type=int, default=22, help="久坐提醒结束小时(1-24)")
 _ARGS = _ARGV.parse_known_args()[0]
 TOKEN_FILE  = _ARGS.token
 CONFIG_FILE = _ARGS.config
 DATA_FILE   = _ARGS.out
 
+def _atomic_write_json(path, data):
+    """原子写 JSON：先写同目录临时文件再 os.replace，避免并发读写读到半写残缺文件。"""
+    parent = os.path.dirname(os.path.abspath(path))
+    if parent:
+        os.makedirs(parent, exist_ok=True)
+    tmp_path = f"{path}.tmp.{os.getpid()}.{int(time.time() * 1000)}"
+    with open(tmp_path, "w", encoding="utf-8") as f:
+        json.dump(data, f, ensure_ascii=False, indent=2)
+    os.replace(tmp_path, path)
+
 def write_data(d):
     """写数据文件（纯 JSON，供 Tauri Rust 读取）。"""
-    with open(DATA_FILE, "w") as f:
-        json.dump(d, f, ensure_ascii=False, indent=2)
+    _atomic_write_json(DATA_FILE, d)
 
 def load_data_file():
     """读取数据文件，兼容纯 JSON 与旧版 const HEALTH_DATA 格式。"""
@@ -107,6 +119,41 @@ def get_7day_averages(history, today_date):
             averages[m] = None
     return averages
 
+def get_7day_series(history, today_date, today_summary):
+    """生成最近 7 天（含今日，按日期升序）的每日汇总数组，供前端 7 日迷你趋势浮层直接渲染。"""
+    try:
+        today_dt = datetime.strptime(today_date, "%Y-%m-%d")
+    except Exception:
+        return []
+    days = [(today_dt - timedelta(days=i)).strftime("%Y-%m-%d") for i in range(6, 0, -1)]
+    by_date = {}
+    for entry in history:
+        d = entry.get("date")
+        if d in days and entry.get("steps") is not None:
+            by_date[d] = entry
+    series = []
+    for d in days:
+        e = by_date.get(d, {})
+        series.append({
+            "date": d,
+            "steps": e.get("steps"),
+            "active_minutes": e.get("active_minutes"),
+            "sleep_asleep_min": e.get("sleep_asleep_min"),
+            "resting_hr": e.get("resting_hr"),
+            "hrv": e.get("hrv"),
+            "spo2": e.get("spo2"),
+        })
+    series.append({
+        "date": today_date,
+        "steps": today_summary.get("steps"),
+        "active_minutes": today_summary.get("active_minutes"),
+        "sleep_asleep_min": today_summary.get("sleep_asleep_min"),
+        "resting_hr": today_summary.get("resting_hr"),
+        "hrv": today_summary.get("hrv"),
+        "spo2": today_summary.get("spo2"),
+    })
+    return series
+
 # ─── Token 管理 ────────────────────────────────────────────────────────────────
 
 def load_token():
@@ -144,7 +191,8 @@ def refresh_access_token():
     })
     r = subprocess.run(
         ["curl", "-s", *PROXY_ARGS, "--max-time", "30", "-X", "POST",
-         "https://oauth2.googleapis.com/token", "-d", body],
+         "https://oauth2.googleapis.com/token", "--data-binary", "@-"],
+        input=body,
         capture_output=True, text=True
     )
     try:
@@ -155,8 +203,7 @@ def refresh_access_token():
         td["access_token"] = tok["access_token"]
         td["expires_in"]  = int(tok.get("expires_in", 3600))
         td["expires_at"]  = int(time.time()) + td["expires_in"]
-        with open(TOKEN_FILE, "w") as f:
-            json.dump(td, f, indent=2, ensure_ascii=False)
+        _atomic_write_json(TOKEN_FILE, td)
         log(f"✅ token 已刷新 (有效期 {td['expires_in']}s)")
         return tok["access_token"]
     except Exception as e:
@@ -165,11 +212,11 @@ def refresh_access_token():
 
 # ─── API 工具 ─────────────────────────────────────────────────────────────────
 
-def _curl_json(cmd):
+def _curl_json(cmd, stdin_data=None):
     """执行 curl 并解析 JSON，带重试。遇空响应/超时/解析失败重试最多 3 次。"""
     for attempt in range(1, 4):
         try:
-            r = subprocess.run(cmd, capture_output=True, text=True, timeout=40)
+            r = subprocess.run(cmd, input=stdin_data, capture_output=True, text=True, timeout=40)
             out = r.stdout.strip()
             if not out:
                 log(f"  ⚠️ API 空响应 (第{attempt}次)，重试...")
@@ -184,23 +231,60 @@ def _curl_json(cmd):
             time.sleep(2)
     return {}
 
+_TOKEN_LOCK = threading.Lock()
+
+def _curl_auth_cfg(tok):
+    safe = (tok or "").replace("\\", "\\\\").replace('"', '\\"').replace("\r", "").replace("\n", "")
+    return f'header = "Authorization: Bearer {safe}"\n'
+
+def _is_401(resp):
+    if not isinstance(resp, dict):
+        return False
+    err = resp.get("error")
+    return isinstance(err, dict) and err.get("code") == 401
+
+def _refresh_token_once(old_tok):
+    global TOKEN
+    with _TOKEN_LOCK:
+        if TOKEN and TOKEN != old_tok:
+            return TOKEN
+        log("🔄 收到 401，自动刷新 access_token 并重试...")
+        new_tok = refresh_access_token()
+        if new_tok:
+            TOKEN = new_tok
+        return TOKEN
+
 def api_get(path):
-    return _curl_json([
+    tok = TOKEN
+    cmd = [
         "curl", "-s", *PROXY_ARGS, "--max-time", "30",
-        "-H", f"Authorization: Bearer {TOKEN}",
+        "-K", "-",
         f"https://health.googleapis.com/v4/{path}"
-    ])
+    ]
+    res = _curl_json(cmd, stdin_data=_curl_auth_cfg(tok))
+    if _is_401(res):
+        tok2 = _refresh_token_once(tok)
+        if tok2 and tok2 != tok:
+            res = _curl_json(cmd, stdin_data=_curl_auth_cfg(tok2))
+    return res
 
 def api_post(dtype, body):
     """POST to dailyRollUp 接口（v4，无 dataTypeName）"""
-    return _curl_json([
+    tok = TOKEN
+    cmd = [
         "curl", "-s", *PROXY_ARGS, "--max-time", "30",
-        "-H", f"Authorization: Bearer {TOKEN}",
+        "-K", "-",
         "-H", "Content-Type: application/json",
         "-X", "POST",
         f"https://health.googleapis.com/v4/users/me/dataTypes/{dtype}/dataPoints:dailyRollUp",
         "-d", json.dumps(body)
-    ])
+    ]
+    res = _curl_json(cmd, stdin_data=_curl_auth_cfg(tok))
+    if _is_401(res):
+        tok2 = _refresh_token_once(tok)
+        if tok2 and tok2 != tok:
+            res = _curl_json(cmd, stdin_data=_curl_auth_cfg(tok2))
+    return res
 
 def make_range(date_str):
     """生成 civilDateRange body（v4 格式，仅 date 字段）"""
@@ -336,23 +420,75 @@ def fetch_resting_hr(today):
 
 def fetch_latest_hr():
     """
-    取最新实时心率样本（Fitbit Air / Health Connect 每 3 秒上报）。
-    返回 (bpm, "HH:MM") 或 (None, None)。
+    取最新实时心率样本（Fitbit Air / Health Connect 每 3 秒上报）及设备同步信息。
+    返回 (bpm, "HH:MM", sync_age_min, device_name)。
     """
     try:
         d = api_get("users/me/dataTypes/heart-rate/dataPoints?pageSize=1")
         pts = d.get("dataPoints", [])
         if not pts:
-            return None, None
-        hr = pts[0].get("heartRate", {})
+            return None, None, None, None
+        pt0 = pts[0]
+        dev = (pt0.get("dataSource", {}).get("device", {}).get("displayName")
+               or pt0.get("dataSource", {}).get("platform")
+               or "Fitbit")
+        hr = pt0.get("heartRate", {})
         bpm = float(hr.get("beatsPerMinute", 0)) or None
-        tt  = hr.get("sampleTime", {}).get("civilTime", {}).get("time", {})
-        if bpm and tt.get("hours") is not None:
+        st = hr.get("sampleTime", {})
+        tt = st.get("civilTime", {}).get("time", {})
+        time_str = None
+        if tt.get("hours") is not None:
             hh, mm = tt.get("hours", 0), tt.get("minutes", 0)
-            return int(round(bpm)), f"{hh:02d}:{mm:02d}"
-        return None, None
+            time_str = f"{hh:02d}:{mm:02d}"
+        sync_age_min = None
+        phys = st.get("physicalTime", "")
+        if phys:
+            try:
+                from datetime import timezone
+                dt_utc = datetime.fromisoformat(phys.replace("Z", "+00:00"))
+                now_utc = datetime.now(timezone.utc)
+                sync_age_min = max(0, int((now_utc - dt_utc).total_seconds() // 60))
+            except Exception:
+                pass
+        return (int(round(bpm)) if bpm else None), time_str, sync_age_min, dev
     except Exception:
-        return None, None
+        return None, None, None, None
+
+def fetch_device_info():
+    """
+    从 users/me/pairedDevices 获取实体手环（排除 MobileTrack）的真实电池电量与最后同步时间。
+    返回 dict: {battery: int|None, status: str, name: str, last_sync: str|None, sync_age_min: int|None}
+    """
+    out = {"battery": None, "status": "", "name": "Fitbit", "last_sync": None, "sync_age_min": None}
+    try:
+        d = api_get("users/me/pairedDevices")
+        devs = d.get("pairedDevices", [])
+        if not devs:
+            return out
+        # 优先选择有 batteryLevel 或非 MobileTrack 的实体手环，按 lastSyncTime 降序
+        real_devs = [x for x in devs if x.get("deviceVersion") != "MobileTrack"]
+        candidates = real_devs if real_devs else devs
+        candidates.sort(key=lambda x: x.get("lastSyncTime") or "", reverse=True)
+        best = candidates[0]
+        out["name"] = best.get("deviceVersion") or "Fitbit"
+        out["status"] = best.get("batteryStatus") or ""
+        if best.get("batteryLevel") is not None:
+            out["battery"] = int(best["batteryLevel"])
+        ts = best.get("lastSyncTime", "")
+        if ts:
+            try:
+                from datetime import timezone
+                dt_utc = datetime.fromisoformat(ts.replace("Z", "+00:00"))
+                now_utc = datetime.now(timezone.utc)
+                out["sync_age_min"] = max(0, int((now_utc - dt_utc).total_seconds() // 60))
+                dt_local = dt_utc.astimezone()
+                out["last_sync"] = dt_local.strftime("%H:%M")
+            except Exception:
+                pass
+        return out
+    except Exception as e:
+        log(f"  ⚠️ 获取手环电量失败: {e}")
+        return out
 
 
 def fetch_hourly_steps(steps_today, steps_yest):
@@ -444,6 +580,7 @@ APP_FIELDS = {
     "last_remind_time": 0,
     "last_move_time": "",
     "last_steps": 0,
+    "computer_away": False,
 }
 
 def preserve_app_fields(today_entry, prev_today):
@@ -561,22 +698,37 @@ def apply_choice(choice):
         log(f"  ⚠️ 选择状态更新失败: {e}")
 
 
+def _get_macos_hid_idle_min():
+    """读取 macOS IOHIDSystem 的键鼠空闲时长（分钟）。非 macOS 或读取失败返回 0。"""
+    if sys.platform != "darwin":
+        return 0
+    try:
+        r = subprocess.run(
+            ["ioreg", "-c", "IOHIDSystem", "-d", "4"],
+            capture_output=True, text=True, timeout=3
+        )
+        m = re.search(r'"HIDIdleTime"\s*=\s*(\d+)', r.stdout)
+        if m:
+            ns = int(m.group(1))
+            return int(ns / 1_000_000_000 / 60)
+    except Exception:
+        pass
+    return 0
+
 def check_sedentary(today_entry, prev_today, steps, now):
     """
-    步数驱动的久坐检测（2026-08-27 v2：点"站起来了"立刻重置，说谎则回滚）：
-    核心原则：步数是唯一的活动判据。步数增加 ≥ STEP_DELTA → 确认活动。
-    ── 场景 1：步数增加（无论用户是否点击）→ 确认解除久坐
-    ── 场景 2：点"站起来了"→ 立刻重置数值（即时反馈），3 分钟后复查步数：
-              步数增加 → 确认解除；步数未变 → 回滚到原始 idle 时间并继续累计
-    ── 场景 3：久坐提醒后用户未操作、步数也未变 → 按 SEDENTARY_REMIND_MIN 间隔复查提醒
+    步数驱动 + 电脑键鼠活跃协同的久坐检测：
+    核心原则：
+    ── 场景 1：步数增加（≥ STEP_DELTA）→ 确认解除久坐
+    ── 场景 2：电脑键鼠空闲 ≥ 20 分钟 → 用户已离开电脑/锁屏/开会（可能没戴表），
+               标记 computer_away=True，不误弹久坐提醒；当用户刚回到电脑前（hid_idle < 5）时，
+               重置活动基线时间，避免一坐下就被弹窗
+    ── 场景 3：点"站起来了"→ 立刻重置数值（即时反馈），3 分钟后复查步数：
+               步数增加 → 确认解除；步数未变 → 回滚到原始 idle 时间并继续累计
+    ── 场景 4：久坐提醒后用户未操作、步数也未变 → 按 SEDENTARY_REMIND_MIN 间隔复查提醒
     返回 (sedentary, idle_min, reminded_this_run)
-
-    基线字段优先从【顶层 today】(prev_today, App/Rust/前端写入的权威实时态) 取，
-    history 条目(today_entry)缺失时才回退——避免 App 直接写在顶层 today 的状态被忽略。
     """
     def _pick(key, default):
-        # 顶层 today 是 App/Rust/前端写入的权威实时态，优先；
-        # history 条目仅作趋势备份，缺字段时回退。
         v = (prev_today or {}).get(key, None)
         if v is None:
             v = today_entry.get(key, None)
@@ -588,6 +740,27 @@ def check_sedentary(today_entry, prev_today, steps, now):
     user_acked_time = _pick("user_acked_time", 0)
     steps_at_ack = _pick("steps_at_ack", 0)
     last_move_time_before_ack = _pick("last_move_time_before_ack", "")
+    was_away = bool(_pick("computer_away", False))
+
+    hid_idle_min = _get_macos_hid_idle_min()
+    away_threshold = min(max(15, SEDENTARY_MIN // 2), 20)
+    if hid_idle_min >= away_threshold:
+        today_entry["computer_away"] = True
+        log(f"  💤 电脑键鼠已空闲 {hid_idle_min}min（≥{away_threshold}min），判定离座/锁屏，暂停久坐计时")
+        return False, 0, False
+    if was_away and hid_idle_min < 5:
+        log("  👋 检测到用户刚回到电脑前，重置久坐计时基线")
+        today_entry["computer_away"] = False
+        today_entry["last_move_time"] = now.strftime("%Y-%m-%d %H:%M:%S")
+        today_entry["last_steps"] = steps
+        today_entry["sedentary_notified"] = False
+        today_entry["follow_up"] = False
+        today_entry["snooze_until"] = 0
+        today_entry["pending_notify"] = False
+        today_entry["remind_event"] = 0
+        today_entry["steps_at_sedentary"] = 0
+        return False, 0, False
+    today_entry["computer_away"] = False
 
     # ── 首次运行：初始化活动基线 ──
     if not last_move_time:
@@ -707,14 +880,13 @@ GOOD_MSGS = [
 ]
 
 def generate_insight(steps, sleep_total, deep, rem, resting_hr, hrv, spo2, resp, azm, yesterday, hour=None):
-    if hour is None:
-        hour = datetime.now().hour
     """
     生成一句简洁的自然语言健康洞察（助理风格）。
     以「今天 vs 昨天」为主轴，结合时段上下文，2–3 句内说完。
     不堆砌数据，关注值得说的变化。
     """
-    hour = datetime.now().hour
+    if hour is None:
+        hour = datetime.now().hour
     is_morning = hour < 11
     is_evening = hour >= 18
     insights = []
@@ -859,11 +1031,13 @@ def log(msg):
     print(f"[{datetime.now().strftime('%H:%M:%S')}] {msg}", flush=True)
 
 def main():
-    global TOKEN, SEDENTARY_MIN, SEDENTARY_REMIND_MIN
+    global TOKEN, SEDENTARY_MIN, SEDENTARY_REMIND_MIN, NOTIFY_START_HOUR, NOTIFY_END_HOUR
     TOKEN = load_token()
-    # 久坐阈值/提醒间隔由 Tauri 侧 settings 传入，用户改设置后立即生效
+    # 久坐阈值/提醒间隔/提醒时段由 Tauri 侧 settings 传入，用户改设置后立即生效
     SEDENTARY_MIN = max(5, _ARGS.sed_min)
     SEDENTARY_REMIND_MIN = max(5, _ARGS.remind_min)
+    NOTIFY_START_HOUR = max(0, min(23, _ARGS.notify_start))
+    NOTIFY_END_HOUR = max(1, min(24, _ARGS.notify_end))
 
     # 如果 token 仍然过期（刷新失败），不要调 API 覆盖好数据
     if is_token_expired():
@@ -872,30 +1046,47 @@ def main():
         return
 
     today = datetime.now().strftime("%Y-%m-%d")
-    log(f"开始采集 {today}...")
+    t_start = time.time()
+    log(f"开始并发采集 {today}...")
 
-    # 每日汇总（dailyRollUp）
-    steps     = fetch_steps(today)
-    distance  = fetch_distance(today)
-    calories  = fetch_calories(today)
-    azm       = fetch_azm(today)
-    azm_str   = f"{sum(azm)}min(脂{azm[0]}/心{azm[1]}/峰{azm[2]})"
-    log(f"  步数: {steps} | 距离: {distance}km | 卡路里: {calories} | 活动: {azm_str}")
+    # 11 个接口并发拉取（耗时从 4~8s 压到 ~1s）
+    with ThreadPoolExecutor(max_workers=6) as pool:
+        f_steps    = pool.submit(fetch_steps, today)
+        f_dist     = pool.submit(fetch_distance, today)
+        f_cal      = pool.submit(fetch_calories, today)
+        f_azm      = pool.submit(fetch_azm, today)
+        f_sleep    = pool.submit(fetch_sleep)
+        f_rhr      = pool.submit(fetch_resting_hr, today)
+        f_resp     = pool.submit(fetch_respiratory_rate, today)
+        f_spo2     = pool.submit(fetch_oxygen_saturation, today)
+        f_hrv      = pool.submit(fetch_hrv, today)
+        f_live_hr  = pool.submit(fetch_latest_hr)
+        f_dev      = pool.submit(fetch_device_info)
 
-    # 睡眠
-    sleep = fetch_sleep()
+        steps    = f_steps.result()
+        distance = f_dist.result()
+        calories = f_cal.result()
+        azm      = f_azm.result()
+        sleep    = f_sleep.result()
+        resting_hr = f_rhr.result()
+        resp       = f_resp.result()
+        spo2       = f_spo2.result()
+        hrv        = f_hrv.result()
+        heart_rate, heart_rate_time, hr_sync_age, hr_dev_name = f_live_hr.result()
+        dev_info   = f_dev.result()
+
+    device_battery = dev_info.get("battery")
+    device_battery_status = dev_info.get("status") or ""
+    device_name = dev_info.get("name") or hr_dev_name or "Fitbit"
+    sync_age_min = dev_info.get("sync_age_min") if dev_info.get("sync_age_min") is not None else hr_sync_age
+    last_sync_time = dev_info.get("last_sync") or heart_rate_time
+
+    azm_str = f"{sum(azm)}min(脂{azm[0]}/心{azm[1]}/峰{azm[2]})"
+    log(f"  步数: {steps} | 距离: {distance}km | 卡路里: {calories} | 活动: {azm_str} ({int((time.time()-t_start)*1000)}ms)")
     sl_str = (f"睡眠{int(sleep['total'])}min(深{sleep['deep']}/REM{sleep['rem']}/浅{sleep['light']}/清醒{sleep['awake']}) "
               f"入睡{sleep['bedtime']}→{sleep['wakeup']}") if sleep else "无睡眠数据"
     log(f"  {sl_str}")
-
-    # 每日指标（GET reconcile）
-    resting_hr  = fetch_resting_hr(today)
-    resp        = fetch_respiratory_rate(today)
-    spo2        = fetch_oxygen_saturation(today)
-    hrv         = fetch_hrv(today)
-    # 实时心率（最新样本，3 秒粒度）
-    heart_rate, heart_rate_time = fetch_latest_hr()
-    log(f"  静息HR: {resting_hr} | 实时HR: {heart_rate}@{heart_rate_time} | 呼吸: {resp} | SpO2: {spo2} | HRV: {hrv}")
+    log(f"  静息HR: {resting_hr} | 实时HR: {heart_rate}@{heart_rate_time} | 手环: {device_name} 电量={device_battery}%({device_battery_status}) 同步={last_sync_time}(距今{sync_age_min}m) | 呼吸: {resp} | SpO2: {spo2} | HRV: {hrv}")
 
     # ── 历史记录（用于变化对比）──
     history = load_history()
@@ -931,8 +1122,10 @@ def main():
     }
     history.append(snapshot)
 
-    # 3. 修剪历史记录（保留最近 500 个快照，防止文件无限增长）
-    history = history[-500:]
+    # 3. 修剪历史记录：保留最近 8 天（满足 7 日均值计算，之前 [-500:] 按 5 分钟粒度只能留 ~1.7 天），
+    #    同时按 2500 条上限保底防止文件无限膨胀
+    cutoff_date = (now_dt - timedelta(days=8)).strftime("%Y-%m-%d")
+    history = [h for h in history if (h.get("date") or "") >= cutoff_date][-2500:]
     
     # 4. 提取对比基线（用于 Python 端日志记录）
     update_seq = today_entry["update_count"]
@@ -946,7 +1139,8 @@ def main():
 
     # ── 久坐检测 ──
     sedentary, idle_min, reminded = check_sedentary(today_entry, prev_today, steps, datetime.now())
-    log(f"  久坐: {'是' if sedentary else '否'} (idle={idle_min}min)")
+    sync_stale = bool(sync_age_min is not None and sync_age_min >= 120)
+    log(f"  久坐: {'是' if sedentary else '否'} (idle={idle_min}min) | 手环电量: {device_battery}% | 同步状态: {'超时未同步' if sync_stale else '正常'}")
 
     # 生成提示
     tip, tip_level = generate_tip(
@@ -988,10 +1182,18 @@ def main():
         "tip_level": tip_level,
         "sedentary": sedentary,
         "idle_min": idle_min,
+        "device_battery": device_battery,
+        "device_battery_status": device_battery_status,
+        "last_sync_time": last_sync_time or datetime.now().strftime("%H:%M"),
+        "sync_age_min": sync_age_min,
+        "sync_stale": sync_stale,
+        "device_name": device_name,
         # ── App 托管交互字段：采集器不权威，优先保留旧值，避免覆盖清零 ──
         **preserve_app_fields(today_entry, prev_today),
         "rolling_averages": rolling_averages,
     }
+    daily_history = get_7day_series(history, today, today_data)
+    today_data["daily_history"] = daily_history
 
     # ── 防清零保护 ──
     # 若本次核心指标全空（步数/距离/卡路里均为 0 且无睡眠），
@@ -1045,9 +1247,9 @@ def ping():
         r = subprocess.run([
             "curl", "-s", "-o", "/dev/null", "-w", "%{http_code}", *_curl_proxy,
             "--connect-timeout", "5", "--max-time", "15",
-            "-H", f"Authorization: Bearer {tok}",
+            "-K", "-",
             "https://health.googleapis.com/v4/users/me/dataTypes/steps/dataPoints:reconcile?pageSize=1",
-        ], capture_output=True, text=True, timeout=20)
+        ], input=_curl_auth_cfg(tok), capture_output=True, text=True, timeout=20)
         res["ms"] = int((time.time() - t0) * 1000)
         code = (r.stdout or "").strip()
         if code == "200":

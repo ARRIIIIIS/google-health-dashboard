@@ -72,13 +72,37 @@ body.hd-refreshing .hd-refresh-btn svg {
   animation: hd-spin 0.9s linear infinite;
 }
 
-/* 液态玻璃：可点控件 hover 即时提亮（不等刷新周期） */
+/* 液态玻璃：可点控件 hover 即时提亮 + 弹性微交互（不等刷新周期） */
+.hd-refresh-btn {
+  transition: transform 0.16s cubic-bezier(0.2, 0.8, 0.2, 1), background 0.16s ease;
+}
 .hd-refresh-btn:hover {
-  background: rgba(255, 255, 255, 0.18) !important;
+  background: rgba(255, 255, 255, 0.20) !important;
 }
 .hd-refresh-btn:active {
-  background: rgba(255, 255, 255, 0.24) !important;
-  transform: scale(0.92);
+  background: rgba(255, 255, 255, 0.26) !important;
+  transform: scale(0.90);
+}
+
+/* 主视图 ↔ 7日趋势浮层 丝滑淡入过渡 & 点击区域微交互 */
+@keyframes hd-fade-in {
+  from {
+    opacity: 0;
+    transform: translateY(2px) scale(0.99);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+.hd-view-enter {
+  animation: hd-fade-in 0.18s cubic-bezier(0.2, 0.8, 0.2, 1) both;
+}
+.hd-click-area {
+  transition: opacity 0.15s ease, transform 0.15s cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+.hd-click-area:active {
+  transform: scale(0.992);
 }
 
 /* 开发者终端：命令提示符后的闪烁光标块（硬切，无淡入淡出） */
