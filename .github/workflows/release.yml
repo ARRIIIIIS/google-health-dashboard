@@ -49,8 +49,8 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
           tagName: ${{ github.ref_name }}
-          releaseName: 'Health Dashboard ${{ github.ref_name }}'
-          releaseBody: '自动构建。macOS (Apple Silicon) 与 Windows 安装包。'
+          releaseName: 'Fitbit Air ${{ github.ref_name }}'
+          releaseBody: '自动构建。macOS (Apple Silicon) 安装包。'
           releaseDraft: false
           prerelease: false
           args: ${{ matrix.args }}
