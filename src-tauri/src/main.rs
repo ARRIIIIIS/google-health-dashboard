@@ -76,17 +76,23 @@ struct Settings {
     /// 每日步数目标（默认 8000）
     #[serde(default = "default_step_goal")]
     step_goal: u64,
-    /// 久坐提醒生效时段（开始小时 0-23，结束小时 1-24，默认 9:00 - 22:00）
+    /// 久坐提醒生效时段（开始小时 0-23，结束小时 1-24，默认 10:00 - 19:00）
     #[serde(default = "default_notify_start")]
     notify_start_hour: u64,
     #[serde(default = "default_notify_end")]
     notify_end_hour: u64,
+    /// 午休免打扰（12:00 - 13:30 暂停久坐计时与提醒）
+    #[serde(default = "default_true")]
+    lunch_break_mute: bool,
+    /// 仅工作日（周一至周五）弹出久坐/低电量提醒
+    #[serde(default = "default_true")]
+    workdays_only: bool,
 }
 
 fn default_true() -> bool { true }
 fn default_step_goal() -> u64 { 8000 }
-fn default_notify_start() -> u64 { 9 }
-fn default_notify_end() -> u64 { 22 }
+fn default_notify_start() -> u64 { 10 }
+fn default_notify_end() -> u64 { 19 }
 
 impl Default for Settings {
     fn default() -> Self {
@@ -117,8 +123,10 @@ impl Default for Settings {
             custom_icon: String::new(),
             dnd_follow: true,
             step_goal: 8000,
-            notify_start_hour: 9,
-            notify_end_hour: 22,
+            notify_start_hour: 10,
+            notify_end_hour: 19,
+            lunch_break_mute: true,
+            workdays_only: true,
         }
     }
 }
@@ -159,146 +167,11 @@ fn custom_icon_file(app: &AppHandle) -> PathBuf {
     dir.join("custom_icon.png")
 }
 
-/// 内置预设图标（base64 PNG，256x256）。使用 SDF 亚像素抗锯齿绘制圆角 Squircle 渐变底 + 白色双能量环。
-fn preset_icon_bytes(id: &str) -> Option<Vec<u8>> {
-    let ((r1, g1, b1), (r2, g2, b2)) = match id {
-        "teal"   => ((56, 229, 125), (16, 158, 82)),
-        "blue"   => ((76, 184, 255), (10, 108, 245)),
-        "orange" => ((255, 196, 61), (242, 112, 18)),
-        "purple" => ((208, 122, 255), (128, 48, 204)),
-        "red"    => ((255, 105, 120), (220, 38, 68)),
-        _ => return None,
-    };
-    use image::{ImageBuffer, Rgba, RgbaImage};
-    let mut img: RgbaImage = ImageBuffer::from_pixel(256, 256, Rgba([0, 0, 0, 0]));
-    let cx = 127.5_f32;
-    let cy = 127.5_f32;
-    let half_box = 112.0_f32;
-    let corner_r = 52.0_f32;
-    let smooth = |e0: f32, e1: f32, x: f32| -> f32 {
-        let t = ((x - e0) / (e1 - e0)).clamp(0.0, 1.0);
-        t * t * (3.0 - 2.0 * t)
-    };
-    for y in 0..256 {
-        for x in 0..256 {
-            let px = x as f32 - cx;
-            let py = y as f32 - cy;
-            let qx = px.abs() - half_box + corner_r;
-            let qy = py.abs() - half_box + corner_r;
-            let d_box = (qx.max(0.0).hypot(qy.max(0.0))) + qx.max(qy).min(0.0) - corner_r;
-            if d_box > 1.0 {
-                continue;
-            }
-            let box_a = 1.0 - smooth(-0.8, 0.8, d_box);
-            let t = ((px + py) / (half_box * 2.0) + 0.5).clamp(0.0, 1.0);
-            let mut r = r1 as f32 * (1.0 - t) + r2 as f32 * t;
-            let mut g = g1 as f32 * (1.0 - t) + g2 as f32 * t;
-            let mut b = b1 as f32 * (1.0 - t) + b2 as f32 * t;
-
-            // 外能量环 + 内核心圆点（抗锯齿）
-            let dist = px.hypot(py);
-            let d_outer = (dist - 62.0).abs() - 10.5;
-            let d_inner = (dist - 31.0).abs() - 8.0;
-            let ring_a = (1.0 - smooth(-0.9, 0.9, d_outer)) * 0.96
-                + (1.0 - smooth(-0.9, 0.9, d_inner)) * 0.68;
-            let w = ring_a.clamp(0.0, 1.0);
-            r = r * (1.0 - w) + 255.0 * w;
-            g = g * (1.0 - w) + 255.0 * w;
-            b = b * (1.0 - w) + 255.0 * w;
-
-            // 玻璃顶棱微高光
-            let d_rim = (d_box + 1.5).abs() - 1.0;
-            if d_rim < 1.0 && (px + py) < 0.0 {
-                let rim_w = (1.0 - smooth(-0.8, 0.8, d_rim)) * 0.35;
-                r = r * (1.0 - rim_w) + 255.0 * rim_w;
-                g = g * (1.0 - rim_w) + 255.0 * rim_w;
-                b = b * (1.0 - rim_w) + 255.0 * rim_w;
-            }
-
-            img.put_pixel(
-                x,
-                y,
-                Rgba([
-                    r.round().clamp(0.0, 255.0) as u8,
-                    g.round().clamp(0.0, 255.0) as u8,
-                    b.round().clamp(0.0, 255.0) as u8,
-                    (box_a * 255.0).round().clamp(0.0, 255.0) as u8,
-                ]),
-            );
-        }
-    }
-    let mut buf = std::io::Cursor::new(Vec::new());
-    if image::DynamicImage::ImageRgba8(img)
-        .write_to(&mut buf, image::ImageFormat::Png)
-        .is_ok()
-    {
-        Some(buf.into_inner())
-    } else {
-        None
-    }
-}
-
 /// 把设置里的 custom_icon 解析成 tauri Image（供 tray 使用）。
 /// 返回 None = 用默认图标。
-fn resolve_icon_image(app: &AppHandle, s: &Settings) -> Option<tauri::image::Image<'static>> {
-    use tauri::image::Image;
-    let c = s.custom_icon.as_str();
-    if c.is_empty() {
-        return None; // 默认图标由调用方从 resources/icons 加载
-    }
-    if let Some(rest) = c.strip_prefix("preset:") {
-        if let Some(bytes) = preset_icon_bytes(rest) {
-            return Image::from_bytes(&bytes).ok();
-        }
-        return None;
-    }
-    if let Some(rest) = c.strip_prefix("base64:") {
-        // 用户上传：先落盘（供前端 <img> 显示 & 重启后复用），再加载
-        if let Ok(bytes) = base64_decode(rest) {
-            if let Ok(dir) = app.path().app_data_dir() {
-                std::fs::create_dir_all(&dir).ok();
-                let _ = std::fs::write(dir.join("custom_icon.png"), &bytes);
-            }
-            return Image::from_bytes(&bytes).ok();
-        }
-        return None;
-    }
+fn resolve_icon_image(_app: &AppHandle, _s: &Settings) -> Option<tauri::image::Image<'static>> {
+    // 已移除自定义图标功能，统一使用内置默认图标
     None
-}
-
-/// 简易 base64 解码（std 无内置，手写最小实现）
-fn base64_decode(s: &str) -> Result<Vec<u8>, ()> {
-    let mut table = [-1i8; 256];
-    for (i, &ch) in b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/".iter().enumerate() {
-        table[ch as usize] = i as i8;
-    }
-    let clean: Vec<u8> = s.bytes().filter(|b| *b != b'\n' && *b != b'\r' && *b != b' ').collect();
-    if clean.len() % 4 != 0 {
-        return Err(());
-    }
-    let mut out = Vec::with_capacity(clean.len() / 4 * 3);
-    let mut i = 0;
-    while i + 4 <= clean.len() {
-        let a = table[clean[i] as usize];
-        let b2 = table[clean[i + 1] as usize];
-        let c_pad = clean[i + 2] == b'=';
-        let d_pad = clean[i + 3] == b'=';
-        let c = if c_pad { 0 } else { table[clean[i + 2] as usize] };
-        let d = if d_pad { 0 } else { table[clean[i + 3] as usize] };
-        if a < 0 || b2 < 0 || c < 0 || d < 0 {
-            return Err(());
-        }
-        let x = ((a as u32) << 18) | ((b2 as u32) << 12) | ((c as u32) << 6) | (d as u32);
-        out.push((x >> 16) as u8);
-        if !c_pad {
-            out.push(((x >> 8) & 0xff) as u8);
-            if !d_pad {
-                out.push((x & 0xff) as u8);
-            }
-        }
-        i += 4;
-    }
-    Ok(out)
 }
 
 /// 把当前设置的自定义图标应用到菜单栏 tray（热更新）。无自定义则回退默认图标。
@@ -320,13 +193,9 @@ fn apply_tray_icon(app: &AppHandle, s: &Settings) {
     let _ = app.tray_by_id("main").map(|t| t.set_tooltip(Some(app_title(s))));
 }
 
-/// 当前生效的 app 名称（自定义为空则用默认 "Health Dashboard"）
-fn app_title(s: &Settings) -> String {
-    if !s.app_name.trim().is_empty() {
-        s.app_name.trim().to_string()
-    } else {
-        "Health Dashboard".to_string()
-    }
+/// 当前生效的 app 名称
+fn app_title(_s: &Settings) -> String {
+    "Fitbit Air".to_string()
 }
 
 /// 命令：设置自定义名称 + 图标。icon 为 "preset:<id>" / "base64:..." / ""（仅名称）。
@@ -369,13 +238,9 @@ fn get_app_identity(app: AppHandle) -> String {
         "name": s.app_name,
         "icon": "",
     });
-    // 若为 base64 上传，直接回原 dataURL；若 preset，回 base64 PNG 预览
+    // 若为 base64 上传，直接回原 dataURL
     if let Some(rest) = s.custom_icon.strip_prefix("base64:") {
         out["icon"] = serde_json::json!(format!("data:image/png;base64,{}", rest));
-    } else if let Some(rest) = s.custom_icon.strip_prefix("preset:") {
-        if let Some(bytes) = preset_icon_bytes(rest) {
-            out["icon"] = serde_json::json!(format!("data:image/png;base64,{}", base64_encode(&bytes)));
-        }
     } else if let Ok(bytes) = std::fs::read(custom_icon_file(&app)) {
         // 兼容：custom_icon 为空但文件存在（老版本残留），回文件
         out["icon"] = serde_json::json!(format!("data:image/png;base64,{}", base64_encode(&bytes)));
@@ -468,27 +333,6 @@ struct MenuStrings {
 
 /// 菜单项句柄：运行时用 set_checked 做确定性单选（radio），不依赖重建时序
 struct MenuItems {
-    theme_auto: tauri::menu::CheckMenuItem<tauri::Wry>,
-    theme_light: tauri::menu::CheckMenuItem<tauri::Wry>,
-    theme_dark: tauri::menu::CheckMenuItem<tauri::Wry>,
-    style_liquid: tauri::menu::CheckMenuItem<tauri::Wry>,
-    style_pixel: tauri::menu::CheckMenuItem<tauri::Wry>,
-    style_brutal: tauri::menu::CheckMenuItem<tauri::Wry>,
-    style_term: tauri::menu::CheckMenuItem<tauri::Wry>,
-    lang_zh: tauri::menu::CheckMenuItem<tauri::Wry>,
-    lang_en: tauri::menu::CheckMenuItem<tauri::Wry>,
-    lang_ja: tauri::menu::CheckMenuItem<tauri::Wry>,
-    refresh_5: tauri::menu::CheckMenuItem<tauri::Wry>,
-    refresh_15: tauri::menu::CheckMenuItem<tauri::Wry>,
-    refresh_30: tauri::menu::CheckMenuItem<tauri::Wry>,
-    sed_30: tauri::menu::CheckMenuItem<tauri::Wry>,
-    sed_40: tauri::menu::CheckMenuItem<tauri::Wry>,
-    sed_45: tauri::menu::CheckMenuItem<tauri::Wry>,
-    sed_60: tauri::menu::CheckMenuItem<tauri::Wry>,
-    sed_90: tauri::menu::CheckMenuItem<tauri::Wry>,
-    visible: tauri::menu::CheckMenuItem<tauri::Wry>,
-    autostart: tauri::menu::CheckMenuItem<tauri::Wry>,
-    dnd_follow: tauri::menu::CheckMenuItem<tauri::Wry>,
     char_qiuqiu: tauri::menu::CheckMenuItem<tauri::Wry>,
     char_nimbo: tauri::menu::CheckMenuItem<tauri::Wry>,
     char_twinkle: tauri::menu::CheckMenuItem<tauri::Wry>,
@@ -498,8 +342,7 @@ struct MenuItems {
 
 struct MenuItemsState(pub std::sync::Mutex<Option<MenuItems>>);
 
-/// 背景玻璃视图指针：切「主题」时用它动态改窗口圆角（液态玻璃 36 / 像素动漫风 0）
-/// `*mut objc::runtime::Object` 不是 Send/Sync，但本 app 仅 main 线程访问，强制安全。
+/// 背景玻璃视图指针：保留状态以统一圆角
 #[cfg(target_os = "macos")]
 struct GlassViewState(pub std::sync::Mutex<Option<*mut objc::runtime::Object>>);
 #[cfg(target_os = "macos")]
@@ -510,43 +353,12 @@ unsafe impl Sync for GlassViewState {}
 /// 互斥组单选修正：把 on 项勾上、同组其它项取消勾
 fn menu_radio(group: &str, on: &str, it: &MenuItems) {
     let set = |mi: &tauri::menu::CheckMenuItem<tauri::Wry>, want: bool| { let _ = mi.set_checked(want); };
-    match group {
-        "theme" => {
-            set(&it.theme_auto, on == "theme_auto");
-            set(&it.theme_light, on == "theme_light");
-            set(&it.theme_dark, on == "theme_dark");
-        }
-        "lang" => {
-            set(&it.lang_zh, on == "lang_zh");
-            set(&it.lang_en, on == "lang_en");
-            set(&it.lang_ja, on == "lang_ja");
-        }
-        "refresh" => {
-            set(&it.refresh_5, on == "refresh_5");
-            set(&it.refresh_15, on == "refresh_15");
-            set(&it.refresh_30, on == "refresh_30");
-        }
-        "sed" => {
-            set(&it.sed_30, on == "sed_30");
-            set(&it.sed_40, on == "sed_40");
-            set(&it.sed_45, on == "sed_45");
-            set(&it.sed_60, on == "sed_60");
-            set(&it.sed_90, on == "sed_90");
-        }
-        "char" => {
-            set(&it.char_qiuqiu, on == "char_qiuqiu");
-            set(&it.char_nimbo, on == "char_nimbo");
-            set(&it.char_twinkle, on == "char_twinkle");
-            set(&it.char_claw, on == "char_claw");
-            set(&it.char_random, on == "char_random");
-        }
-        "style" => {
-            set(&it.style_liquid, on == "style_liquid");
-            set(&it.style_pixel, on == "style_pixel");
-            set(&it.style_brutal, on == "style_brutal");
-            set(&it.style_term, on == "style_term");
-        }
-        _ => {}
+    if group == "char" {
+        set(&it.char_qiuqiu, on == "char_qiuqiu");
+        set(&it.char_nimbo, on == "char_nimbo");
+        set(&it.char_twinkle, on == "char_twinkle");
+        set(&it.char_claw, on == "char_claw");
+        set(&it.char_random, on == "char_random");
     }
 }
 
@@ -705,99 +517,23 @@ fn build_main_menu(app: &AppHandle, s: &Settings) -> tauri::menu::Menu<tauri::Wr
         &[&char_random, &char_qiuqiu, &char_nimbo, &char_twinkle, &char_claw]
     ).unwrap();
 
-    // ── 视觉主题子菜单（仅换皮肤：液态玻璃 / 像素动漫风）──
-    let style_liquid = CheckMenuItem::with_id(app, "style_liquid", &m.style_liquid, true, s.style == "liquid-glass", None::<&str>).unwrap();
-    let style_pixel  = CheckMenuItem::with_id(app, "style_pixel",  &m.style_pixel,  true, s.style == "pixel-anime",  None::<&str>).unwrap();
-    let style_brutal = CheckMenuItem::with_id(app, "style_brutal", &m.style_brutal, true, s.style == "brutalist-web", None::<&str>).unwrap();
-    let style_term   = CheckMenuItem::with_id(app, "style_term",   &m.style_term,   true, s.style == "developer-terminal", None::<&str>).unwrap();
-    let style_sub = Submenu::with_id_and_items(
-        app, "style_menu", &m.style_sub, true,
-        &[&style_liquid, &style_pixel, &style_brutal, &style_term]
-    ).unwrap();
-
-    // ── 外观子菜单（明暗）──
-    let theme_auto  = CheckMenuItem::with_id(app, "theme_auto",  &m.theme_auto,  true, s.theme == "auto",  None::<&str>).unwrap();
-    let theme_light = CheckMenuItem::with_id(app, "theme_light", &m.theme_light, true, s.theme == "light", None::<&str>).unwrap();
-    let theme_dark  = CheckMenuItem::with_id(app, "theme_dark",  &m.theme_dark,  true, s.theme == "dark",  None::<&str>).unwrap();
-    let theme_sub = Submenu::with_id_and_items(
-        app, "theme_menu", &m.theme_sub, true,
-        &[&theme_auto, &theme_light, &theme_dark]
-    ).unwrap();
-
-    // ── 语言子菜单 ──
-    let lang_zh = CheckMenuItem::with_id(app, "lang_zh", &m.lang_zh, true, s.language == "zh-CN", None::<&str>).unwrap();
-    let lang_en = CheckMenuItem::with_id(app, "lang_en", &m.lang_en,   true, s.language == "en",    None::<&str>).unwrap();
-    let lang_ja = CheckMenuItem::with_id(app, "lang_ja", &m.lang_ja,    true, s.language == "ja",    None::<&str>).unwrap();
-    let lang_sub = Submenu::with_id_and_items(
-        app, "lang_menu", &m.lang_sub, true,
-        &[&lang_zh, &lang_en, &lang_ja]
-    ).unwrap();
-
-    // ── 刷新间隔子菜单 ──
-    let refresh_5  = CheckMenuItem::with_id(app, "refresh_5",  &m.refresh_5,  true, s.refresh_interval_min == 5,  None::<&str>).unwrap();
-    let refresh_15 = CheckMenuItem::with_id(app, "refresh_15", &m.refresh_15, true, s.refresh_interval_min == 15, None::<&str>).unwrap();
-    let refresh_30 = CheckMenuItem::with_id(app, "refresh_30", &m.refresh_30, true, s.refresh_interval_min == 30, None::<&str>).unwrap();
-    let refresh_sub = Submenu::with_id_and_items(
-        app, "refresh_menu", &m.refresh_sub, true,
-        &[&refresh_5, &refresh_15, &refresh_30]
-    ).unwrap();
-
-    // ── 久坐提醒子菜单（阈值 30/40/45/60/90 直接平铺）──
-    let sed_30 = CheckMenuItem::with_id(app, "sed_30", &format!("{} {}", 30, m.min_unit), true, s.sedentary_min == 30, None::<&str>).unwrap();
-    let sed_40 = CheckMenuItem::with_id(app, "sed_40", &format!("{} {}", 40, m.min_unit), true, s.sedentary_min == 40, None::<&str>).unwrap();
-    let sed_45 = CheckMenuItem::with_id(app, "sed_45", &format!("{} {}", 45, m.min_unit), true, s.sedentary_min == 45, None::<&str>).unwrap();
-    let sed_60 = CheckMenuItem::with_id(app, "sed_60", &format!("{} {}", 60, m.min_unit), true, s.sedentary_min == 60, None::<&str>).unwrap();
-    let sed_90 = CheckMenuItem::with_id(app, "sed_90", &format!("{} {}", 90, m.min_unit), true, s.sedentary_min == 90, None::<&str>).unwrap();
-    let sed_sub = Submenu::with_id_and_items(
-        app, "sed_menu", &m.sed_sub, true,
-        &[&sed_30, &sed_40, &sed_45, &sed_60, &sed_90]
-    ).unwrap();
-
-    // ── 基础项 ──
-    let toggle_visible = CheckMenuItem::with_id(app, "toggle_visible", &m.show_widget, true, s.widget_visible, None::<&str>).unwrap();
-    let autostart  = CheckMenuItem::with_id(app, "toggle_autostart", &m.autostart,  true, s.autostart,    None::<&str>).unwrap();
-    let dnd_follow = CheckMenuItem::with_id(app, "dnd_follow", &m.dnd_follow, true, s.dnd_follow, None::<&str>).unwrap();
-    let refresh_now = MenuItem::with_id(app, "refresh_now",  &m.refresh_now,  true, Some("R")).unwrap();
-    let open_folder = MenuItem::with_id(app, "open_data_folder", &m.open_folder,  true, None::<&str>).unwrap();
+    // ── 极简菜单栏：桌搭伙伴 + 设置向导与偏好 + 重启 + 退出 ──
     let setup_wizard_item = MenuItem::with_id(app, "open_setup", &m.setup_wizard, true, None::<&str>).unwrap();
     let restart_item      = MenuItem::with_id(app, "restart", &m.restart, true, None::<&str>).unwrap();
-    let quit        = MenuItem::with_id(app, "quit",        &m.quit,             true, Some("Q")).unwrap();
+    let quit              = MenuItem::with_id(app, "quit", &m.quit, true, Some("Q")).unwrap();
     let sep = PredefinedMenuItem::separator(app).unwrap();
 
-    // 分组顺序：窗口 → 操作 → 个性化 → 提醒与数据 → 配置 → 维护 → 退出（隔离沉底）
-    let mut items: Vec<&dyn IsMenuItem<tauri::Wry>> = Vec::new();
-    items.push(&toggle_visible);      // 窗口：高频开关
-    items.push(&refresh_now);         // 操作：立即刷新
-    items.push(&sep);
-    items.push(&char_sub);            // 个性化：桌搭伙伴 / 主题 / 外观 / 语言
-    items.push(&style_sub);
-    items.push(&theme_sub);
-    items.push(&lang_sub);
-    items.push(&sep);
-    items.push(&sed_sub);             // 提醒与数据
-    items.push(&dnd_follow);          // 跟随系统勿扰（静默久坐提醒）
-    items.push(&refresh_sub);
-    items.push(&sep);
-    items.push(&setup_wizard_item);   // 配置
-    items.push(&open_folder);
-    items.push(&sep);
-    items.push(&autostart);           // 维护
-    items.push(&restart_item);
-    items.push(&sep);
-    items.push(&quit);                // 退出：单独隔离，避免误点
+    let items: Vec<&dyn IsMenuItem<tauri::Wry>> = vec![
+        &char_sub,
+        &setup_wizard_item,
+        &sep,
+        &restart_item,
+        &quit,
+    ];
     let menu = Menu::with_items(app, &items).unwrap();
 
-    // 保存句柄供 on_menu_event 用 set_checked 做确定性单选
     if let Some(st) = app.try_state::<MenuItemsState>() {
         *st.0.lock().unwrap() = Some(MenuItems {
-            theme_auto, theme_light, theme_dark,
-            style_liquid, style_pixel, style_brutal, style_term,
-            lang_zh, lang_en, lang_ja,
-            refresh_5, refresh_15, refresh_30,
-            sed_30, sed_40, sed_45, sed_60, sed_90,
-            visible: toggle_visible,
-            autostart,
-            dnd_follow,
             char_qiuqiu, char_nimbo, char_twinkle, char_claw, char_random,
         });
     }
@@ -820,13 +556,10 @@ fn rebuild_tray_menu(app: &AppHandle) {
 /// NSGlassEffectView / NSVisualEffectView 通过 layer.shadow* 实现折射/高光，
 /// 这是液态玻璃的核心视觉特征，不能关。只关 NSWindow 自身的 setHasShadow。
 #[cfg(target_os = "macos")]
-/// 切主题时动态调整窗口圆角：液态玻璃 36 / 实底硬边风格（像素动漫 / 网页粗野主义 / 开发者终端）0
+/// 切主题时动态调整窗口圆角：液态玻璃 24（对齐 macOS 原生小组件规范） / 实底硬边风格 0
 #[cfg(target_os = "macos")]
-fn style_corner_radius(style: &str) -> f64 {
-    match style {
-        "pixel-anime" | "brutalist-web" | "developer-terminal" => 0.0,
-        _ => 36.0,
-    }
+fn style_corner_radius(_style: &str) -> f64 {
+    24.0
 }
 #[cfg(target_os = "macos")]
 fn apply_window_style(app: &AppHandle, style: &str) {
@@ -954,6 +687,176 @@ fn clamp_to_screens(x: i32, y: i32, displays: &[serde_json::Value], w: i32, h: i
     (cx, cy)
 }
 
+/// 通过 macOS CoreGraphics 获取桌面上其他小组件的真实逻辑坐标矩形 (x, y, w, h)
+/// 包含系统原生桌面小组件（通知中心 WidgetKit）以及独立小组件 App（如 Galaxy Buds Manager）。
+#[cfg(target_os = "macos")]
+fn desktop_widget_rects() -> Vec<(i32, i32, i32, i32)> {
+    use std::ffi::{c_void, CString};
+    #[repr(C)]
+    #[derive(Clone, Copy)]
+    struct CGPoint { x: f64, y: f64 }
+    #[repr(C)]
+    #[derive(Clone, Copy)]
+    struct CGSize { width: f64, height: f64 }
+    #[repr(C)]
+    #[derive(Clone, Copy)]
+    struct CGRect { origin: CGPoint, size: CGSize }
+
+    extern "C" {
+        fn CGWindowListCopyWindowInfo(option: u32, relative_to_window: u32) -> *const c_void;
+        fn CFArrayGetCount(arr: *const c_void) -> isize;
+        fn CFArrayGetValueAtIndex(arr: *const c_void, idx: isize) -> *const c_void;
+        fn CFDictionaryGetValue(dict: *const c_void, key: *const c_void) -> *const c_void;
+        fn CFStringCreateWithCString(alloc: *const c_void, c_str: *const i8, encoding: u32) -> *const c_void;
+        fn CFNumberGetValue(num: *const c_void, the_type: isize, val_ptr: *mut c_void) -> bool;
+        fn CGRectMakeWithDictionaryRepresentation(dict: *const c_void, rect: *mut CGRect) -> bool;
+        fn CFRelease(cf: *const c_void);
+    }
+
+    let mut out = Vec::new();
+    let my_pid = std::process::id() as i64;
+    unsafe {
+        // kCGWindowListOptionOnScreenOnly = 1
+        let arr = CGWindowListCopyWindowInfo(1, 0);
+        if arr.is_null() {
+            return out;
+        }
+        let utf8 = 0x0800_0100u32;
+        let k_pid = CFStringCreateWithCString(std::ptr::null(), CString::new("kCGWindowOwnerPID").unwrap().as_ptr(), utf8);
+        let k_layer = CFStringCreateWithCString(std::ptr::null(), CString::new("kCGWindowLayer").unwrap().as_ptr(), utf8);
+        let k_bounds = CFStringCreateWithCString(std::ptr::null(), CString::new("kCGWindowBounds").unwrap().as_ptr(), utf8);
+        let k_alpha = CFStringCreateWithCString(std::ptr::null(), CString::new("kCGWindowAlpha").unwrap().as_ptr(), utf8);
+
+        let count = CFArrayGetCount(arr);
+        for i in 0..count {
+            let dict = CFArrayGetValueAtIndex(arr, i);
+            if dict.is_null() { continue; }
+
+            let mut pid: i64 = 0;
+            let p_val = CFDictionaryGetValue(dict, k_pid);
+            if !p_val.is_null() {
+                CFNumberGetValue(p_val, 4, &mut pid as *mut i64 as *mut c_void); // kCFNumberSInt64Type = 4
+            }
+            if pid == my_pid { continue; }
+
+            let mut layer: i64 = 0;
+            let l_val = CFDictionaryGetValue(dict, k_layer);
+            if !l_val.is_null() {
+                CFNumberGetValue(l_val, 4, &mut layer as *mut i64 as *mut c_void);
+            }
+            // 仅收集桌面层小组件（layer < 0，覆盖通知中心原生小组件与独立桌面小组件）
+            if layer >= 0 { continue; }
+
+            let mut alpha: f64 = 1.0;
+            let a_val = CFDictionaryGetValue(dict, k_alpha);
+            if !a_val.is_null() {
+                CFNumberGetValue(a_val, 6, &mut alpha as *mut f64 as *mut c_void); // kCFNumberFloat64Type = 6
+            }
+            if alpha <= 0.01 { continue; }
+
+            let b_dict = CFDictionaryGetValue(dict, k_bounds);
+            if b_dict.is_null() { continue; }
+            let mut r = CGRect { origin: CGPoint { x: 0.0, y: 0.0 }, size: CGSize { width: 0.0, height: 0.0 } };
+            if CGRectMakeWithDictionaryRepresentation(b_dict, &mut r) {
+                let rw = r.size.width.round() as i32;
+                let rh = r.size.height.round() as i32;
+                if rw >= 80 && rh >= 80 && rw <= 1200 && rh <= 1000 {
+                    out.push((r.origin.x.round() as i32, r.origin.y.round() as i32, rw, rh));
+                }
+            }
+        }
+        CFRelease(k_pid);
+        CFRelease(k_layer);
+        CFRelease(k_bounds);
+        CFRelease(k_alpha);
+        CFRelease(arr);
+    }
+    out
+}
+
+/// 磁吸对齐计算：自动吸附到桌面其他小组件的边缘（齐平 / 12px 或 16px 间距）以及屏幕边距。
+/// 返回 (snapped_x, snapped_y, 触发对齐的边列表)
+#[cfg(target_os = "macos")]
+fn compute_magnetic_snap(
+    x: i32,
+    y: i32,
+    w: i32,
+    h: i32,
+    peers: &[(i32, i32, i32, i32)],
+    displays: &[serde_json::Value],
+) -> (i32, i32, Vec<&'static str>) {
+    const THRESH: i32 = 14;
+    let mut best_dx: Option<(i32, i32, &'static str)> = None; // (abs_diff, target_x, edge)
+    let mut best_dy: Option<(i32, i32, &'static str)> = None;
+
+    let mut try_x = |cand_x: i32, edge: &'static str| {
+        let diff = (cand_x - x).abs();
+        if diff <= THRESH {
+            if best_dx.map_or(true, |(bd, _, _)| diff < bd) {
+                best_dx = Some((diff, cand_x, edge));
+            }
+        }
+    };
+    let mut try_y = |cand_y: i32, edge: &'static str| {
+        let diff = (cand_y - y).abs();
+        if diff <= THRESH {
+            if best_dy.map_or(true, |(bd, _, _)| diff < bd) {
+                best_dy = Some((diff, cand_y, edge));
+            }
+        }
+    };
+
+    // 1. 对齐其他桌面小组件（含系统原生小组件 & 独立小组件 App）
+    for &(px, py, pw, ph) in peers {
+        // X 轴：左对齐、右对齐、水平相邻贴合（12px / 16px）
+        try_x(px, "left");
+        try_x(px + pw - w, "right");
+        try_x(px + pw + 12, "left");
+        try_x(px + pw + 16, "left");
+        try_x(px - w - 12, "right");
+        try_x(px - w - 16, "right");
+
+        // Y 轴：顶对齐、底对齐、垂直堆叠贴合（12px / 16px）
+        try_y(py, "top");
+        try_y(py + ph - h, "bottom");
+        try_y(py + ph + 12, "top");
+        try_y(py + ph + 16, "top");
+        try_y(py - h - 12, "bottom");
+        try_y(py - h - 16, "bottom");
+    }
+
+    // 2. 对齐当前所在屏幕的安全边距（8px / 16px / 菜单栏下 38px）
+    for d in displays {
+        let dx = d["x"].as_i64().unwrap_or(0) as i32;
+        let dy = d["y"].as_i64().unwrap_or(0) as i32;
+        let dw = d["width"].as_i64().unwrap_or(0) as i32;
+        let dh = d["height"].as_i64().unwrap_or(0) as i32;
+        if x + w / 2 >= dx && x + w / 2 <= dx + dw && y + h / 2 >= dy && y + h / 2 <= dy + dh {
+            try_x(dx + 8, "left");
+            try_x(dx + 16, "left");
+            try_x(dx + dw - w - 8, "right");
+            try_x(dx + dw - w - 16, "right");
+            try_y(dy + 38, "top");
+            try_y(dy + dh - h - 16, "bottom");
+        }
+    }
+
+    let mut edges = Vec::new();
+    let nx = if let Some((_, tx, edge)) = best_dx {
+        edges.push(edge);
+        tx
+    } else {
+        x
+    };
+    let ny = if let Some((_, ty, edge)) = best_dy {
+        edges.push(edge);
+        ty
+    } else {
+        y
+    };
+    (nx, ny, edges)
+}
+
 /// 按增量移动主窗口，clamp 到屏幕内，保存新位置。
 // move_win_by 已移除：菜单不再提供「移动」功能（窗口位置固定）
 /// 菜单栏回调用的全局 AppHandle（setup 时写入，回调里读取）
@@ -1027,13 +930,15 @@ fn run_fetch_once(
     remind_min: u64,
     notify_start: u64,
     notify_end: u64,
+    lunch_mute: bool,
+    workdays_only: bool,
 ) -> std::io::Result<()> {
     if let Some(parent) = data.parent() {
         let _ = std::fs::create_dir_all(parent);
     }
     let py_cmd = python_bin();
-    let status = Command::new(py_cmd)
-        .env_remove("PYTHONHOME")
+    let mut cmd = Command::new(py_cmd);
+    cmd.env_remove("PYTHONHOME")
         .env_remove("PYTHONPATH")
         .arg(py)
         .arg("--once")
@@ -1050,8 +955,14 @@ fn run_fetch_once(
         .arg("--notify-start")
         .arg(notify_start.to_string())
         .arg("--notify-end")
-        .arg(notify_end.to_string())
-        .status()?;
+        .arg(notify_end.to_string());
+    if lunch_mute {
+        cmd.arg("--lunch-mute");
+    }
+    if workdays_only {
+        cmd.arg("--workdays-only");
+    }
+    let status = cmd.status()?;
     if !status.success() {
         eprintln!("[health] python fetch exited with {:?}", status.code());
     }
@@ -1569,12 +1480,12 @@ fn refresh_data(app: &AppHandle) {
         }
         let _guard = ResetGuard;
         let (py, data, tok, cfg) = paths(&app);
-        let (sed_min, remind_min, notify_start, notify_end) = {
+        let (sed_min, remind_min, notify_start, notify_end, lunch_mute, workdays_only) = {
             let sh = app.state::<SettingsHandle>();
             let g = sh.0.lock().unwrap();
-            (g.sedentary_min, g.sedentary_remind_min, g.notify_start_hour, g.notify_end_hour)
+            (g.sedentary_min, g.sedentary_remind_min, g.notify_start_hour, g.notify_end_hour, g.lunch_break_mute, g.workdays_only)
         };
-        let _ = run_fetch_once(&py, &data, &tok, &cfg, sed_min, remind_min, notify_start, notify_end);
+        let _ = run_fetch_once(&py, &data, &tok, &cfg, sed_min, remind_min, notify_start, notify_end, lunch_mute, workdays_only);
         let _ = app.emit("data-updated", ());
     });
 }
@@ -1805,6 +1716,52 @@ fn show_sedentary_notification(app: AppHandle, idle_min: i64) -> Result<(), Stri
         .sound("Glass")
         .show()
         .map_err(|e| e.to_string())
+}
+
+/// 静默低电量通知：当手环电量 ≤ 20% 时在白天提醒一次，不发声
+#[tauri::command]
+fn show_battery_notification(app: AppHandle, device_name: String, battery: i64, lang: Option<String>) -> Result<(), String> {
+    use tauri_plugin_notification::NotificationExt;
+    let n = app.notification();
+    if let Ok(state) = n.permission_state() {
+        if state != tauri_plugin_notification::PermissionState::Granted {
+            let _ = n.request_permission();
+        }
+    }
+    let dev = if device_name.trim().is_empty() { "Fitbit".to_string() } else { device_name };
+    let is_en = lang.as_deref() == Some("en");
+    let title = if is_en { "Low Tracker Battery" } else { "手环低电量提醒" };
+    let body = if is_en {
+        format!("{} battery is down to {}%. Remember to charge during a break or shower.", dev, battery)
+    } else {
+        format!("{} 电量仅剩 {}%，洗澡或休息时记得顺手充个电", dev, battery)
+    };
+    n.builder()
+        .title(title)
+        .body(body)
+        .show()
+        .map_err(|e| e.to_string())
+}
+
+/// 检测系统当前是否有媒体/音乐正在输出音频（macOS coreaudiod assertion，零权限弹窗）
+fn is_audio_playing() -> bool {
+    #[cfg(target_os = "macos")]
+    {
+        if let Ok(out) = std::process::Command::new("pmset").args(["-g", "assertions"]).output() {
+            let txt = String::from_utf8_lossy(&out.stdout);
+            return txt.lines().any(|l| l.contains("coreaudiod") && l.contains("output.context.preventuseridlesleep"));
+        }
+        false
+    }
+    #[cfg(not(target_os = "macos"))]
+    {
+        false
+    }
+}
+
+#[tauri::command]
+fn is_audio_playing_cmd() -> bool {
+    is_audio_playing()
 }
 
 /// 菜单栏图标下方的久坐提醒弹窗（与小组件内弹窗同款样式）。
@@ -2210,18 +2167,35 @@ fn handle_setup_conn(mut stream: TcpStream, app: &AppHandle) {
     if method == "POST" && path.starts_with("/api/save") {
         let resp = setup_save(&body, app);
         send_http(&mut stream, 200, "application/json; charset=utf-8", resp.as_bytes());
+    } else if method == "POST" && path.starts_with("/api/open-data-dir") {
+        let dir = app.path().app_data_dir().unwrap_or_default();
+        #[cfg(target_os = "macos")]
+        let _ = std::process::Command::new("open").arg(&dir).spawn();
+        #[cfg(target_os = "windows")]
+        let _ = std::process::Command::new("explorer").arg(&dir).spawn();
+        #[cfg(target_os = "linux")]
+        let _ = std::process::Command::new("xdg-open").arg(&dir).spawn();
+        send_http(&mut stream, 200, "application/json; charset=utf-8", br#"{"ok":true}"#);
     } else if method == "GET" && path.starts_with("/api/load") {
         let s = load_settings(app);
-        // 注意：第 3 步「外观与标识」要回填 app_name / custom_icon，
-        // 之前漏了这两个字段，导致向导里的外观设置永远是空的。
         let out = serde_json::json!({
             "google_client_id": s.google_client_id,
             "google_client_secret": s.google_client_secret,
             "llm_base_url": s.llm_base_url,
             "llm_api_key": s.llm_api_key,
             "llm_model": s.llm_model,
-            "app_name": s.app_name,
-            "custom_icon": s.custom_icon,
+            "theme": s.theme,
+            "language": s.language,
+            "character": s.character,
+            "sedentary_min": s.sedentary_min,
+            "notify_start_hour": s.notify_start_hour,
+            "notify_end_hour": s.notify_end_hour,
+            "lunch_break_mute": s.lunch_break_mute,
+            "workdays_only": s.workdays_only,
+            "dnd_follow": s.dnd_follow,
+            "step_goal": s.step_goal,
+            "refresh_interval_min": s.refresh_interval_min,
+            "autostart": s.autostart,
         });
         let j = serde_json::to_string(&out).unwrap_or_else(|_| " {}".to_string());
         send_http(&mut stream, 200, "application/json; charset=utf-8", j.as_bytes());
@@ -2479,6 +2453,10 @@ fn setup_save(body: &[u8], app: &AppHandle) -> String {
 
     // 1) settings.json
     let mut s = load_settings(app);
+    let prev_lang = s.language.clone();
+    let prev_theme = s.theme.clone();
+    let prev_char = s.character.clone();
+    let prev_autostart = s.autostart;
     if let Some(v) = val.get("llm_base_url").and_then(|x| x.as_str()) { s.llm_base_url = v.to_string(); }
     if let Some(v) = val.get("llm_api_key").and_then(|x| x.as_str()) { s.llm_api_key = v.to_string(); }
     if let Some(v) = val.get("llm_model").and_then(|x| x.as_str()) { s.llm_model = v.to_string(); }
@@ -2487,9 +2465,48 @@ fn setup_save(body: &[u8], app: &AppHandle) -> String {
     if let Some(v) = val.get("app_name").and_then(|x| x.as_str()) { s.app_name = v.to_string(); }
     if let Some(v) = val.get("custom_icon").and_then(|x| x.as_str()) { s.custom_icon = v.to_string(); }
     if let Some(v) = val.get("dnd_follow").and_then(|x| x.as_bool()) { s.dnd_follow = v; }
+    if let Some(v) = val.get("theme").and_then(|x| x.as_str()) {
+        if matches!(v, "auto" | "light" | "dark") { s.theme = v.to_string(); }
+    }
+    if let Some(v) = val.get("language").and_then(|x| x.as_str()) {
+        if matches!(v, "zh" | "en") { s.language = v.to_string(); }
+    }
+    if let Some(v) = val.get("character").and_then(|x| x.as_str()) {
+        if matches!(v, "qiuqiu" | "nimbo" | "twinkle" | "claw" | "random") { s.character = v.to_string(); }
+    }
+    if let Some(v) = val.get("sedentary_min").and_then(|x| x.as_u64()) {
+        s.sedentary_min = v.clamp(1, 240);
+    }
+    if let Some(v) = val.get("notify_start_hour").and_then(|x| x.as_u64()) {
+        s.notify_start_hour = v.min(23);
+    }
+    if let Some(v) = val.get("notify_end_hour").and_then(|x| x.as_u64()) {
+        s.notify_end_hour = v.clamp(1, 24);
+    }
+    if let Some(v) = val.get("lunch_break_mute").and_then(|x| x.as_bool()) { s.lunch_break_mute = v; }
+    if let Some(v) = val.get("workdays_only").and_then(|x| x.as_bool()) { s.workdays_only = v; }
+    if let Some(v) = val.get("step_goal").and_then(|x| x.as_u64()) {
+        s.step_goal = v.clamp(1000, 50000);
+    }
+    if let Some(v) = val.get("refresh_interval_min").and_then(|x| x.as_u64()) {
+        s.refresh_interval_min = v.clamp(1, 120);
+        if let Some(rs) = app.try_state::<RefreshState>() {
+            *rs.0.lock().unwrap() = s.refresh_interval_min;
+        }
+    }
+    if let Some(v) = val.get("autostart").and_then(|x| x.as_bool()) { s.autostart = v; }
     let _ = save_settings_file(app, &s);
 
-    // 1b) 应用自定义图标到菜单栏（若有）
+    // 1b) 热应用外观、开机自启、菜单语言、自定义图标
+    if s.theme != prev_theme {
+        apply_window_appearance(app, &s.theme);
+    }
+    if s.autostart != prev_autostart {
+        let _ = set_autostart(s.autostart);
+    }
+    if s.language != prev_lang || s.character != prev_char {
+        rebuild_tray_menu(app);
+    }
     apply_tray_icon(app, &s);
 
     // 2) ~/.google-health-mcp/config.json（合并，不破坏已有 token）
@@ -2794,33 +2811,60 @@ fn main() {
                     }
                 }
 
-                // 拖拽移动后保存新位置（debounce 600ms，避免拖拽中频繁写盘；clamp 防止移出屏幕）
+                // 拖拽停稳后自动磁吸对齐（对齐系统桌面小组件、独立小组件及屏幕边距）+ 保存新位置
                 let app_handle = app.handle().clone();
-                let last_save: Arc<Mutex<std::time::Instant>> =
-                    Arc::new(Mutex::new(std::time::Instant::now()));
+                let move_seq = Arc::new(std::sync::atomic::AtomicU64::new(0));
+                let snap_suppress_until = Arc::new(Mutex::new(std::time::Instant::now()));
                 let _ = win.on_window_event(move |event| {
                     if let tauri::WindowEvent::Moved(pos) = event {
-                        let mut last = last_save.lock().unwrap();
-                        if last.elapsed().as_millis() < 600 {
-                            return;
+                        {
+                            let sup = snap_suppress_until.lock().unwrap();
+                            if std::time::Instant::now() < *sup {
+                                return;
+                            }
                         }
-                        *last = std::time::Instant::now();
-                        // Moved 事件给的是物理像素，统一换算成逻辑点再存（Retina 上 scale=2，
-                        // 否则每次重启位置都会被 scale 除一次，越跑越偏）
-                        let scale = app_handle
-                            .get_webview_window("main")
-                            .and_then(|w| w.scale_factor().ok())
-                            .unwrap_or(1.0)
-                            .max(0.1);
-                        let lx = (pos.x as f64 / scale).round() as i32;
-                        let ly = (pos.y as f64 / scale).round() as i32;
-                        let sh = app_handle.state::<SettingsHandle>();
-                        let (cx, cy) = clamp_to_screens(lx, ly, &collect_displays(), 344, 272);
-                        sh.set("pos_saved", true);
-                        sh.set("pos_x", cx);
-                        sh.set("pos_y", cy);
-                        let _ = save_settings_file(&app_handle, &sh.clone_inner());
-                        eprintln!("[health] 保存窗口位置（逻辑点）: ({}, {})", cx, cy);
+                        let seq = move_seq.fetch_add(1, Ordering::SeqCst) + 1;
+                        let seq_ref = move_seq.clone();
+                        let sup_ref = snap_suppress_until.clone();
+                        let ah = app_handle.clone();
+                        let px = pos.x;
+                        let py = pos.y;
+                        std::thread::spawn(move || {
+                            std::thread::sleep(Duration::from_millis(160));
+                            if seq_ref.load(Ordering::SeqCst) != seq {
+                                return;
+                            }
+                            // 若用户鼠标还按住没松手，等待松手后再磁吸（最多等 ~2.5s）
+                            for _ in 0..16 {
+                                let pressed: usize = unsafe { msg_send![class!(NSEvent), pressedMouseButtons] };
+                                if pressed == 0 {
+                                    break;
+                                }
+                                std::thread::sleep(Duration::from_millis(150));
+                                if seq_ref.load(Ordering::SeqCst) != seq {
+                                    return;
+                                }
+                            }
+                            let Some(w) = ah.get_webview_window("main") else { return; };
+                            let scale = w.scale_factor().unwrap_or(1.0).max(0.1);
+                            let lx = (px as f64 / scale).round() as i32;
+                            let ly = (py as f64 / scale).round() as i32;
+                            let displays = collect_displays();
+                            let peers = desktop_widget_rects();
+                            let (sx, sy, edges) = compute_magnetic_snap(lx, ly, 344, 272, &peers, &displays);
+                            let (cx, cy) = clamp_to_screens(sx, sy, &displays, 344, 272);
+                            if (cx != lx || cy != ly) && !edges.is_empty() {
+                                *sup_ref.lock().unwrap() = std::time::Instant::now() + Duration::from_millis(350);
+                                let _ = w.set_position(tauri::LogicalPosition::new(cx as f64, cy as f64));
+                                let _ = ah.emit("snap-aligned", serde_json::json!({ "edges": edges }));
+                            }
+                            let sh = ah.state::<SettingsHandle>();
+                            sh.set("pos_saved", true);
+                            sh.set("pos_x", cx);
+                            sh.set("pos_y", cy);
+                            let _ = save_settings_file(&ah, &sh.clone_inner());
+                            eprintln!("[health] 保存窗口位置（逻辑点）: ({}, {}) snap={:?}", cx, cy, edges);
+                        });
                     }
                 });
             }
@@ -2880,68 +2924,16 @@ fn main() {
                         match id {
                             "quit" => app.exit(0),
                             "restart" => relaunch(app),
-                            "refresh_now" => { let _ = app.emit("refresh-now", ()); }
                             "open_setup" => {
                                 ensure_setup_server(app.clone());
                                 let _ = open_external(format!("http://127.0.0.1:{}/setup", SETUP_SERVER_PORT));
                             }
-                            "open_data_folder" => {
-                                let dir = app.path().app_data_dir().unwrap_or_default();
-                                #[cfg(target_os = "macos")]
-                                let _ = std::process::Command::new("open").arg(&dir).spawn();
-                                #[cfg(target_os = "windows")]
-                                let _ = std::process::Command::new("explorer").arg(&dir).spawn();
-                                #[cfg(target_os = "linux")]
-                                let _ = std::process::Command::new("xdg-open").arg(&dir).spawn();
-                            }
-                            // ── 主题 ──
-                            "theme_auto"  => { radio("theme", "theme_auto");  sh.set("theme", "auto");  apply_window_appearance(app, "auto");  s_changed = true; }
-                            "theme_light" => { radio("theme", "theme_light"); sh.set("theme", "light"); apply_window_appearance(app, "light"); s_changed = true; }
-                            "theme_dark"  => { radio("theme", "theme_dark");  sh.set("theme", "dark");  apply_window_appearance(app, "dark");  s_changed = true; }
-                            // ── 主题（仅换皮肤：液态玻璃 / 像素动漫风）──
-                            "style_liquid" => { radio("style", "style_liquid"); sh.set("style", "liquid-glass"); apply_window_style(app, "liquid-glass"); s_changed = true; }
-                            "style_pixel"  => { radio("style", "style_pixel");  sh.set("style", "pixel-anime");  apply_window_style(app, "pixel-anime");  s_changed = true; }
-                            "style_brutal" => { radio("style", "style_brutal"); sh.set("style", "brutalist-web"); apply_window_style(app, "brutalist-web"); s_changed = true; }
-                            "style_term"   => { radio("style", "style_term");   sh.set("style", "developer-terminal"); apply_window_style(app, "developer-terminal"); s_changed = true; }
-                            // ── 语言 ──
-                            "lang_zh" => { radio("lang", "lang_zh"); sh.set("language", "zh-CN"); s_changed = true; }
-                            "lang_en" => { radio("lang", "lang_en"); sh.set("language", "en");    s_changed = true; }
-                            "lang_ja" => { radio("lang", "lang_ja"); sh.set("language", "ja");    s_changed = true; }
-                            // ── 刷新间隔 ──
-                            "refresh_5"  => { radio("refresh", "refresh_5");  sh.set("refresh_interval_min", 5u64);  s_changed = true; }
-                            "refresh_15" => { radio("refresh", "refresh_15"); sh.set("refresh_interval_min", 15u64); s_changed = true; }
-                            "refresh_30" => { radio("refresh", "refresh_30"); sh.set("refresh_interval_min", 30u64); s_changed = true; }
-                            // ── 久坐阈值 / 提醒间隔 ──
-                            "sed_30"  => { radio("sed", "sed_30");  sh.set("sedentary_min", 30u64); s_changed = true; }
-                            "sed_40"  => { radio("sed", "sed_40");  sh.set("sedentary_min", 40u64); s_changed = true; }
-                            "sed_45"  => { radio("sed", "sed_45");  sh.set("sedentary_min", 45u64); s_changed = true; }
-                            "sed_60"  => { radio("sed", "sed_60");  sh.set("sedentary_min", 60u64); s_changed = true; }
-                            "sed_90"  => { radio("sed", "sed_90");  sh.set("sedentary_min", 90u64); s_changed = true; }
                             // ── 桌搭伙伴 ──
                             "char_qiuqiu"  => { radio("char", "char_qiuqiu");  sh.set("character", "qiuqiu");  s_changed = true; }
                             "char_nimbo"   => { radio("char", "char_nimbo");   sh.set("character", "nimbo");   s_changed = true; }
                             "char_twinkle" => { radio("char", "char_twinkle"); sh.set("character", "twinkle"); s_changed = true; }
                             "char_claw"    => { radio("char", "char_claw");    sh.set("character", "claw");    s_changed = true; }
                             "char_random"  => { radio("char", "char_random");  sh.set("character", "random");  s_changed = true; }
-                            // ── 布尔 toggle ──
-                            "toggle_autostart" => {
-                                let cur = sh.0.lock().unwrap().autostart;
-                                sh.set("autostart", !cur); s_changed = true;
-                                let _ = set_autostart(!cur);
-                                if let Some(ref it) = *items_state.0.lock().unwrap() { let _ = it.autostart.set_checked(!cur); }
-                            }
-                            // ── 跟随系统勿扰（专注模式时静默久坐提醒）──
-                            "dnd_follow" => {
-                                let cur = sh.0.lock().unwrap().dnd_follow;
-                                sh.set("dnd_follow", !cur); s_changed = true;
-                                if let Some(ref it) = *items_state.0.lock().unwrap() { let _ = it.dnd_follow.set_checked(!cur); }
-                            }
-                            // ── 显示/隐藏小组件 ──
-                            "toggle_visible" => {
-                                let cur = sh.0.lock().unwrap().widget_visible;
-                                sh.set("widget_visible", !cur); s_changed = true;
-                                if let Some(ref it) = *items_state.0.lock().unwrap() { let _ = it.visible.set_checked(!cur); }
-                            }
                             _ => {}
                         }
 
@@ -2983,12 +2975,12 @@ fn main() {
                 if !SCREEN_LOCKED.load(Ordering::SeqCst) {
                     let (py, data, tok, cfg) = paths(&handle);
                     // 久坐阈值/提醒间隔/提醒时段每次采集前读最新设置，改设置立即生效
-                    let (sed_min, remind_min, notify_start, notify_end) = {
+                    let (sed_min, remind_min, notify_start, notify_end, lunch_mute, workdays_only) = {
                         let sh = handle.state::<SettingsHandle>();
                         let g = sh.0.lock().unwrap();
-                        (g.sedentary_min, g.sedentary_remind_min, g.notify_start_hour, g.notify_end_hour)
+                        (g.sedentary_min, g.sedentary_remind_min, g.notify_start_hour, g.notify_end_hour, g.lunch_break_mute, g.workdays_only)
                     };
-                    let _ = run_fetch_once(&py, &data, &tok, &cfg, sed_min, remind_min, notify_start, notify_end);
+                    let _ = run_fetch_once(&py, &data, &tok, &cfg, sed_min, remind_min, notify_start, notify_end, lunch_mute, workdays_only);
                     let _ = handle.emit("data-updated", ());
                 }
                 let secs = {
@@ -3007,6 +2999,22 @@ fn main() {
             // 启动即常驻本地向导服务（仅监听 127.0.0.1）：
             // 之前是点「设置向导」才临时起，首次点击要等服务就绪，且外部无法预检。
             // 常驻后：网页内两个延迟测试随时可用，点击也无需等待。
+            // 轻量音乐播放状态监听线程（3s 检测一次 coreaudiod assertion，锁屏时跳过）
+            let music_handle = setup_handle.clone();
+            std::thread::spawn(move || {
+                let mut last_state: Option<bool> = None;
+                loop {
+                    if !SCREEN_LOCKED.load(Ordering::SeqCst) {
+                        let playing = is_audio_playing();
+                        if last_state != Some(playing) {
+                            last_state = Some(playing);
+                            let _ = music_handle.emit("music-state", playing);
+                        }
+                    }
+                    std::thread::sleep(Duration::from_secs(3));
+                }
+            });
+
             ensure_setup_server(setup_handle.clone());
 
             Ok(())
@@ -3023,7 +3031,9 @@ fn main() {
             save_settings,
             set_autostart_cmd,
             is_dnd_active_cmd,
+            is_audio_playing_cmd,
             show_sedentary_notification,
+            show_battery_notification,
             show_sed_popover,
             hide_sed_popover,
             get_appearance,

@@ -20,16 +20,21 @@ fi
 export PATH="$HOME/.cargo/bin:/opt/homebrew/bin:$PATH"
 
 LSREG="/System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister"
-BUILD_APP="$REPO/src-tauri/target/release/bundle/macos/Health Dashboard.app"
-DEST_APP="/Applications/Health Dashboard.app"
+BUILD_APP="$REPO/src-tauri/target/release/bundle/macos/Fitbit Air.app"
+DEST_APP="/Applications/Fitbit Air.app"
+OLD_APP="/Applications/Health Dashboard.app"
 
-echo "== 1/4 编译打包 Health Dashboard.app =="
+echo "== 1/4 编译打包 Fitbit Air.app =="
 npm run tauri build -- --bundles app
 
 echo "== 2/4 停止旧进程并清理重复注册 =="
 killall -9 health-dashboard-tauri 2>/dev/null || true
 sleep 1
 "$LSREG" -u "$BUILD_APP" 2>/dev/null || true
+if [ -d "$OLD_APP" ]; then
+  "$LSREG" -u "$OLD_APP" 2>/dev/null || true
+  rm -rf "$OLD_APP"
+fi
 rm -rf "/tmp/hd-rel" "/tmp/hd-dmg-mnt" 2>/dev/null || true
 
 echo "== 3/4 移动安装到 ${DEST_APP}（不留构建目录副本）=="

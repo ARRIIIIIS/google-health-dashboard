@@ -97,7 +97,7 @@ function buildWidgetDoc(character, eid, sed) {
   const HEAD = "<!doctype html><html><head><meta charset='utf-8'>" +
     "<style>html,body{margin:0;padding:0;background:transparent;overflow:hidden;width:100%;height:100%;-webkit-user-select:none;user-select:none}" +
     "#bot{width:100%;height:100%;display:flex;align-items:center;justify-content:center}#bot svg{display:block;width:100%;height:100%}</style></head><body><div id='bot'></div>" +
-    "<script>" + POWER_GATE + "document.addEventListener('contextmenu',function(e){e.preventDefault();});document.addEventListener('selectstart',function(e){e.preventDefault();});document.addEventListener('click',function(){try{if(window.__cycleEmotion)window.__cycleEmotion();}catch(e){}});</script>";
+    "<script>" + POWER_GATE + "document.addEventListener('contextmenu',function(e){e.preventDefault();});document.addEventListener('selectstart',function(e){e.preventDefault();});document.addEventListener('click',function(){try{if(window.__cycleEmotion)window.__cycleEmotion();}catch(e){}try{window.parent.postMessage({type:'hd-pet-click'},'*');}catch(e){}});</script>";
   const esc = (s) => s.replace(/<\/script>/gi, "<\\/script>");
   const SED = sed ? "true" : "false";
   const ROT = String(ROTATE_MS);
@@ -168,47 +168,41 @@ function buildWidgetDoc(character, eid, sed) {
 
 // ── Apple system palette ─────────────────────────────────────────────────────
 const C_DARK = {
-  // 三级文字：玻璃通透后背景会透上来，alpha 太低会被背景吃掉 → 全面提高不透明度
+  // 保持文字纯白高不透明度 + 亮色系数值，背景恢复极通透液态玻璃，靠光学阴影拉高对比度
   label: "rgba(255,255,255,1)",
   second: "rgba(255,255,255,0.96)",
-  third: "rgba(255,255,255,0.85)",
-  // 冷调玻璃：蓝灰 tint（R<B 且 G 居中）透出系统磨砂，贴近 Apple 深色系统色
-  bg: "linear-gradient(160deg, rgba(44,46,54,0.32) 0%, rgba(24,26,32,0.24) 100%)",
-  card: "rgba(255,255,255,0.10)",
-  hairline: "rgba(255,255,255,0.12)",
-  // 玻璃顶棱（受光），深色下提亮才能看清面板边界
-  rim: "rgba(255,255,255,0.24)",
-  rimSoft: "rgba(255,255,255,0.12)",
-  // 玻璃控件底（刷新按钮/芯片/设置控件统一）
-  glassCtl: "rgba(255,255,255,0.10)",
-  green: "#30D158",
-  red: "#FF375F",
-  blue: "#0A84FF",
-  teal: "#40C8E0",
-  indigo: "#5E5CE6",
-  amber: "#FF9F0A",
-  alert: "#FF453A",
+  third: "rgba(255,255,255,0.88)",
+  bg: "rgba(0,0,0,0.06)",
+  card: "rgba(255,255,255,0.11)",
+  hairline: "rgba(255,255,255,0.14)",
+  rim: "rgba(255,255,255,0.34)",
+  rimSoft: "rgba(255,255,255,0.15)",
+  glassCtl: "rgba(255,255,255,0.12)",
+  green: "#3EE068",
+  red: "#FF5C7C",
+  blue: "#409CFF",
+  teal: "#56D8F0",
+  indigo: "#8F8DFF",
+  amber: "#FFB340",
+  alert: "#FF5A4F",
 };
 const C_LIGHT = {
-  // 浅色下反向操作：文字压到近纯黑并保持高不透明度，才能从透光的玻璃上「咬」出来
   label: "rgba(0,0,0,0.98)",
-  second: "rgba(24,24,28,0.96)",
-  third: "rgba(35,35,42,0.86)",
-  // 系统 NSVisualEffectView 提供真实液态玻璃模糊，前端只叠极薄白色 tint 提亮。
-  // 0.74 太重盖住玻璃 → 0.22 透出系统模糊；再降到 0.10/0.05（用户「很透」偏好）
-  bg: "linear-gradient(160deg, rgba(236,238,248,0.10) 0%, rgba(228,230,242,0.05) 100%)",
-  card: "rgba(0,0,0,0.03)",
-  hairline: "rgba(0,0,0,0.07)",
-  rim: "rgba(255,255,255,0.45)",
-  rimSoft: "rgba(255,255,255,0.18)",
-  glassCtl: "rgba(255,255,255,0.14)",
-  green: "#248A3D",
-  red: "#D70015",
-  blue: "#007AFF",
-  teal: "#00829A",
-  indigo: "#5E5CE6",
-  amber: "#B25000",
-  alert: "#D70015",
+  second: "rgba(18,18,24,0.95)",
+  third: "rgba(30,30,38,0.88)",
+  bg: "transparent",
+  card: "rgba(0,0,0,0.04)",
+  hairline: "rgba(0,0,0,0.09)",
+  rim: "rgba(255,255,255,0.62)",
+  rimSoft: "rgba(255,255,255,0.25)",
+  glassCtl: "rgba(255,255,255,0.18)",
+  green: "#157A2E",
+  red: "#C80014",
+  blue: "#005EC4",
+  teal: "#006B80",
+  indigo: "#4338CA",
+  amber: "#A84800",
+  alert: "#C80014",
 };
 // 本地提示兜底池：LLM 未配置 / 失败时启用（蓝点），按分钟轮换保证「久不更新」也能变
 const SEDENTARY_TIPS = [
@@ -227,143 +221,14 @@ const FALLBACK_TIPS = [
   "工作再忙也要记得喝水，起身倒杯水走两步吧，身体会很感谢你的。",
   "午后容易困倦没精神，深呼吸提提神，起身走动两分钟真的会清醒。",
 ];
-// ── Pixel Anime palette ──────────────────────────────────────────────────────
-// 深紫实底 + NES 配色 + 等宽字体；零渐变零圆角零模糊，硬边像素阴影 4px_4px_0px。
-const C_PIXEL_DARK = {
-  label: "#e0e0ff",
-  second: "rgba(224,224,255,0.85)",
-  third: "rgba(224,224,255,0.55)",
-  // 实底深紫 + 8x 像素网格（CSS gradient 模拟）；前端不让任何模糊透出
-  bg: "#2d1b69",
-  card: "#1a1040",
-  hairline: "#1a1040",
-  // NES 调色板
-  rim: "#ffd93d",   // 金色边框/角块
-  rimSoft: "#4a90d9",
-  glassCtl: "#1a1040",
-  green: "#50c878",
-  red: "#ff6b6b",
-  blue: "#4a90d9",
-  teal: "#4a90d9",
-  indigo: "#4a90d9",
-  amber: "#ffd93d",
-  alert: "#ff6b6b",
-};
-const C_PIXEL_LIGHT = {
-  label: "#1a1040",
-  second: "rgba(26,16,64,0.85)",
-  third: "rgba(26,16,64,0.55)",
-  // 浅紫青实底（pixel-anime 浅色仍保持实底 + 零模糊）
-  bg: "#c5cae9",
-  card: "#e8eaf6",
-  hairline: "#1a1040",
-  rim: "#ffd93d",
-  rimSoft: "#4a90d9",
-  glassCtl: "#e8eaf6",
-  green: "#50c878",
-  red: "#ff6b6b",
-  blue: "#4a90d9",
-  teal: "#4a90d9",
-  indigo: "#4a90d9",
-  amber: "#ffd93d",
-  alert: "#ff6b6b",
-};
-// ── Brutalist Web palette（网页粗野主义）────────────────────────────────────────
-// 纯白/纯黑实底 + 1px 硬边 + 零圆角零阴影零渐变；等宽正文 + 衬线标题，功能色受限。
-const C_BRUTAL_DARK = {
-  label: "#ffffff",
-  second: "#d9d9d9",
-  third: "#9a9a9a",
-  bg: "#000000",
-  card: "#101010",
-  hairline: "#ffffff",
-  rim: "#ffffff",
-  rimSoft: "#ffffff",
-  glassCtl: "#1a1a1a",
-  green: "#33cc33",
-  red: "#ff5555",
-  blue: "#6699ff",
-  teal: "#33cc33",
-  indigo: "#6699ff",
-  amber: "#ffd54a",
-  alert: "#ff5555",
-};
-const C_BRUTAL_LIGHT = {
-  label: "#000000",
-  second: "#333333",
-  third: "#6b6b6b",
-  bg: "#ffffff",
-  card: "#f4f4f4",
-  hairline: "#000000",
-  rim: "#000000",
-  rimSoft: "#000000",
-  glassCtl: "#dfdfdf",
-  green: "#008000",
-  red: "#ff0000",
-  blue: "#0000ff",
-  teal: "#008000",
-  indigo: "#0000ff",
-  amber: "#b8860b",
-  alert: "#ff0000",
-};
-// ── Developer Terminal palette（开发者终端）─────────────────────────────────────
-// 近黑/纸白实底 + 等宽字体 + 荧光绿；青/品红/琥珀为终端强调色，零阴影零渐变。
-const C_TERM_DARK = {
-  label: "#4AF626",
-  second: "#8BE9FD",
-  third: "#6272A4",
-  bg: "#0A0E12",
-  card: "#0D141B",
-  hairline: "#1F2937",
-  rim: "#1F2937",
-  rimSoft: "#1F2937",
-  glassCtl: "#0D141B",
-  green: "#4AF626",
-  red: "#FF79C6",
-  blue: "#8BE9FD",
-  teal: "#4AF626",
-  indigo: "#FF79C6",
-  amber: "#FFB86C",
-  alert: "#FF79C6",
-};
-const C_TERM_LIGHT = {
-  label: "#1D3B1D",
-  second: "#0E7C8A",
-  third: "#8899AA",
-  bg: "#FAFAF4",
-  card: "#FFFFFF",
-  hairline: "#E4E4DA",
-  rim: "#E4E4DA",
-  rimSoft: "#E4E4DA",
-  glassCtl: "#FFFFFF",
-  green: "#2F9E2F",
-  red: "#C2257A",
-  blue: "#0E7C8A",
-  teal: "#2F9E2F",
-  indigo: "#C2257A",
-  amber: "#9A6A00",
-  alert: "#C2257A",
-};
-// 当前生效调色板（随系统/设置切换）
+// 当前生效调色板（唯一液态玻璃，随系统/设置切换深浅）
 let C = C_DARK;
-// 按 (style, dark) 选调色板：液态玻璃走 Apple 调色板，其余走各自实底调色板
-function pickPalette(style, dark) {
-  if (style === "pixel-anime") return dark ? C_PIXEL_DARK : C_PIXEL_LIGHT;
-  if (style === "brutalist-web") return dark ? C_BRUTAL_DARK : C_BRUTAL_LIGHT;
-  if (style === "developer-terminal") return dark ? C_TERM_DARK : C_TERM_LIGHT;
+function pickPalette(_style, dark) {
   return dark ? C_DARK : C_LIGHT;
 }
-// 像素动漫风开关（按 style 判定，不再依赖组件内 settingsRef）
-function isPixel(style) {
-  return style === "pixel-anime";
-}
-// 网页粗野主义 / 开发者终端 风格开关
-function isBrutal(style) {
-  return style === "brutalist-web";
-}
-function isTerm(style) {
-  return style === "developer-terminal";
-}
+const isPixel = () => false;
+const isBrutal = () => false;
+const isTerm = () => false;
 
 // 磨砂由系统 NSVisualEffectView 提供（HudWindow 材质），前端不再模拟噪点/高光
 
@@ -431,18 +296,6 @@ function cleanTip(s) {
 function SettingsPanel({ draft, setDraft, onSave, onCancel, busy, rerender, systemDark, onTestApi, testStatus, onTestDataApi, testDataStatus }) {
   const set = (k, v) => setDraft((d) => ({ ...d, [k]: v }));
 
-  // 把 custom_icon 设置渲染成左上角预览（预设→色块，上传→img）
-  const iconPreview = (ci) => {
-    if (!ci) return null;
-    if (ci.startsWith("base64:")) {
-      return <img src={"data:image/png;base64," + ci.slice(7)} width="22" height="22" style={{ objectFit: "cover", borderRadius: 4 }} alt="" />;
-    }
-    const map = { "preset:teal":[48,209,88], "preset:blue":[10,132,255], "preset:orange":[255,159,10], "preset:purple":[175,82,222], "preset:red":[255,69,58] };
-    const c = map[ci];
-    if (c) return <div style={{ width: 22, height: 22, borderRadius: "50%", background: `rgb(${c[0]},${c[1]},${c[2]})`, boxShadow: "inset 0 0 0 2px rgba(255,255,255,0.7)" }} />;
-    return null;
-  };
-
   const guideCard = { background: "rgba(128,128,128,0.08)", border: "1px solid " + C.hairline, borderRadius: 12, padding: "9px 11px", marginTop: 6 };
   const guideBtn = { display: "inline-block", marginTop: 7, fontSize: 10, fontWeight: 600, color: "#fff", background: C.blue, padding: "5px 11px", borderRadius: 8, cursor: "pointer" };
   const sedCard = {
@@ -496,73 +349,12 @@ function SettingsPanel({ draft, setDraft, onSave, onCancel, busy, rerender, syst
       onContextMenu={(e) => e.preventDefault()}
       style={{
         position: "absolute", inset: 0, zIndex: 100, overflowY: "auto", overflowX: "hidden",
-        padding: "12px 14px 16px", borderRadius: 36,
+        padding: "12px 14px 16px", borderRadius: 24,
         background: C.bg,
         border: "1px solid " + C.hairline, boxSizing: "border-box",
       }}
     >
       <div style={{ fontSize: 13, fontWeight: 700, color: C.label, marginBottom: 6 }}>{T("settingsTitle")}</div>
-
-      {/* ── App 名称与图标（自定义，置顶）── */}
-      <div style={{ padding: "10px 12px", borderRadius: 14, border: "1px solid " + C.hairline, background: "rgba(128,128,128,0.06)" }}>
-        <div style={{ fontSize: 11, fontWeight: 700, color: C.label, marginBottom: 7 }}>{"App 名称与图标"}</div>
-        <label style={labelStyle}>{"App 名称"}</label>
-        <input
-          type="text"
-          value={draft.app_name || ""}
-          onChange={(e) => set("app_name", e.target.value)}
-          placeholder={T("appTitle")}
-          style={inputStyle}
-        />
-        <label style={labelStyle}>{"图标"}</label>
-        <div style={{ display: "flex", gap: 6, flexWrap: "wrap", alignItems: "center" }}>
-          {/* 当前图标预览 */}
-          <div style={{ width: 26, height: 26, borderRadius: 6, border: "1px solid " + C.hairline, overflow: "hidden", display: "flex", alignItems: "center", justifyContent: "center", background: "rgba(128,128,128,0.12)", flexShrink: 0 }}>
-            {iconPreview(draft.custom_icon)}
-          </div>
-          {/* 预设图标 */}
-          {[["preset:teal","48,209,88"],["preset:blue","10,132,255"],["preset:orange","255,159,10"],["preset:purple","175,82,222"],["preset:red","255,69,58"]].map(([pid, rgb]) => {
-            const c = rgb.split(",").map(Number);
-            const active = draft.custom_icon === pid;
-            return (
-              <div key={pid} onClick={() => set("custom_icon", pid)}
-                style={{ width: 26, height: 26, borderRadius: 6, cursor: "pointer", border: active ? "2px solid " + C.blue : "1px solid " + C.hairline, boxSizing: "border-box",
-                  background: `rgb(${c[0]},${c[1]},${c[2]})`, position: "relative", flexShrink: 0 }}>
-                <div style={{ position: "absolute", inset: 7, borderRadius: "50%", border: "2px solid rgba(255,255,255,0.85)" }} />
-              </div>
-            );
-          })}
-          {/* 上传 */}
-          <label style={{ width: 26, height: 26, borderRadius: 6, border: "1px dashed " + C.hairline, display: "flex", alignItems: "center", justifyContent: "center", cursor: "pointer", color: C.second, fontSize: 16, flexShrink: 0, background: "rgba(128,128,128,0.1)" }}>
-            +
-            <input
-              type="file"
-              accept="image/png,image/jpeg"
-              style={{ display: "none" }}
-              onChange={(e) => {
-                const f = e.target.files && e.target.files[0];
-                if (!f) return;
-                const rd = new FileReader();
-                rd.onload = () => {
-                  const dataUrl = rd.result;
-                  const b64 = String(dataUrl).split(",")[1] || "";
-                  set("custom_icon", "base64:" + b64);
-                };
-                rd.readAsDataURL(f);
-                e.target.value = "";
-              }}
-            />
-          </label>
-          {/* 重置 */}
-          <div onClick={() => { set("app_name", ""); set("custom_icon", ""); }}
-            style={{ fontSize: 9.5, fontWeight: 600, color: C.alert, border: "1px solid " + C.alert, borderRadius: 7, padding: "3px 9px", cursor: "pointer", marginLeft: "auto" }}>
-            {"重置"}
-          </div>
-        </div>
-        <div style={{ fontSize: 8.5, color: C.third, marginTop: 6, lineHeight: 1.35 }}>
-          {"图标应用到小组件左上角 + 菜单栏，保存后立即生效。"}
-        </div>
-      </div>
 
       {/* ── 久坐提醒（置顶高亮卡片：自定义阈值 + 提醒时段）── */}
       <div style={sedCard}>
@@ -595,6 +387,16 @@ function SettingsPanel({ draft, setDraft, onSave, onCancel, busy, rerender, syst
               </div>
             );
           })}
+        </div>
+        <div style={{ display: "flex", flexDirection: "column", gap: 6, marginTop: 8 }}>
+          <label style={{ display: "flex", alignItems: "center", gap: 6, cursor: "pointer", fontSize: 10, color: C.second }}>
+            <input type="checkbox" checked={draft.lunch_break_mute !== false} onChange={(e) => set("lunch_break_mute", e.target.checked)} style={{ accentColor: C.amber }} />
+            <span>{T("lunchBreakMute")}</span>
+          </label>
+          <label style={{ display: "flex", alignItems: "center", gap: 6, cursor: "pointer", fontSize: 10, color: C.second }}>
+            <input type="checkbox" checked={draft.workdays_only !== false} onChange={(e) => set("workdays_only", e.target.checked)} style={{ accentColor: C.amber }} />
+            <span>{T("workdaysOnly")}</span>
+          </label>
         </div>
       </div>
 
@@ -729,8 +531,24 @@ function SettingsPanel({ draft, setDraft, onSave, onCancel, busy, rerender, syst
   </div >
 );
 }
-function Widget({ data, settings, appIdentity, character, onRefresh, onReset, onCycleTip, justResetAt, sedPopRef, dndActive, bottomTip, forceWidgetPop, setForceWidgetPop, powerPaused }) {
-  const [showTrend, setShowTrend] = useState(false);
+function Widget({ data, settings, appIdentity, character, onRefresh, onReset, onCycleTip, justResetAt, sedPopRef, dndActive, bottomTip, forceWidgetPop, setForceWidgetPop, powerPaused, musicPlaying, snapEdges }) {
+  const [trendMetric, setTrendMetric] = useState(null);
+  const [hoverTrendIdx, setHoverTrendIdx] = useState(null);
+  const [petBounce, setPetBounce] = useState(false);
+  const [ripples, setRipples] = useState([]);
+  const glassRef = useRef(null);
+  const spawnRipple = useCallback((e) => {
+    const el = glassRef.current;
+    if (!el || e.button !== 0) return;
+    const r = el.getBoundingClientRect();
+    const id = Date.now() + Math.random();
+    const x = e.clientX - r.left;
+    const y = e.clientY - r.top;
+    setRipples((prev) => [...prev.slice(-3), { id, x, y }]);
+    setTimeout(() => {
+      setRipples((prev) => prev.filter((item) => item.id !== id));
+    }, 600);
+  }, []);
   const styleId = settings && settings.style;
   const brutal = isBrutal(styleId);
   const term = isTerm(styleId);
@@ -751,6 +569,7 @@ function Widget({ data, settings, appIdentity, character, onRefresh, onReset, on
   const lastSyncTime = t.last_sync_time || updated;
   const syncAgeMin = t.sync_age_min;
   const syncStale = !!t.sync_stale;
+  const offWrist = !!t.off_wrist;
   const deviceName = t.device_name || "Fitbit";
   const deviceBattery = t.device_battery != null ? Number(t.device_battery) : null;
   const deviceBatteryStatus = t.device_battery_status || "";
@@ -783,6 +602,26 @@ function Widget({ data, settings, appIdentity, character, onRefresh, onReset, on
       if (w) w.postMessage({ type: "hd-power", paused: !!powerPaused }, "*");
     } catch (e) {}
   }, [powerPaused, ballDoc]);
+
+  // 点击萌宠 iframe 时触发弹性微交互（无声）
+  useEffect(() => {
+    let timer = null;
+    const onMsg = (e) => {
+      if (e && e.data && e.data.type === "hd-pet-click") {
+        setPetBounce(false);
+        requestAnimationFrame(() => {
+          setPetBounce(true);
+          if (timer) clearTimeout(timer);
+          timer = setTimeout(() => setPetBounce(false), 460);
+        });
+      }
+    };
+    window.addEventListener("message", onMsg);
+    return () => {
+      window.removeEventListener("message", onMsg);
+      if (timer) clearTimeout(timer);
+    };
+  }, []);
 
   // 父窗口级的「眼睛跟随鼠标」gaze（带 Mac 省电优化）：
   // 1) 30fps 时间戳节流（避免高回报率鼠标每秒触发数百次跨 iframe 调用）；
@@ -875,9 +714,16 @@ function Widget({ data, settings, appIdentity, character, onRefresh, onReset, on
     setForceWidgetPop(false);
   };
 
+  const grooving = !!(musicPlaying && !effSed && !powerPaused);
   const ballWrap = (
-    <div data-tauri-drag-region="false" style={{ position: "relative", width: 52, height: 52, flexShrink: 0, zIndex: 10 }}>
+    <div data-tauri-drag-region="false" className={petBounce ? "hd-pet-bouncing" : grooving ? "hd-pet-grooving" : undefined} style={{ position: "relative", width: 52, height: 52, flexShrink: 0, zIndex: 10 }}>
       {ballIframe}
+      {grooving && (
+        <>
+          <span className="hd-music-note" style={{ right: 2, top: 4, color: C.teal, animationDelay: "0s" }}>♪</span>
+          <span className="hd-music-note" style={{ right: -4, top: 14, color: C.green, animationDelay: "0.95s" }}>♫</span>
+        </>
+      )}
     </div>
   );
 
@@ -929,7 +775,30 @@ function Widget({ data, settings, appIdentity, character, onRefresh, onReset, on
     ? microPool[(effIdle || 0) % microPool.length]
     : T("standHint");
 
-  const idleChipWithPop = effIdle != null ? (
+  const idleChipWithPop = offWrist ? (
+    <div
+      data-tauri-drag-region="false"
+      title={T("offWristTip")}
+      style={{
+        display: "flex",
+        alignItems: "center",
+        gap: 4,
+        height: 19,
+        padding: "0 8px 0 6px",
+        borderRadius: brutal ? 0 : term ? 3 : 99,
+        flexShrink: 0,
+        fontSize: 9,
+        fontWeight: 600,
+        letterSpacing: 0.2,
+        background: C.card,
+        color: C.third,
+        cursor: "default",
+      }}
+    >
+      <span style={{ fontSize: 9.5, lineHeight: 1 }}>⌚</span>
+      <span>{T("offWrist")}</span>
+    </div>
+  ) : effIdle != null ? (
     <div style={{ position: "relative" }}>
       <div data-tauri-drag-region="false" title={T("sedThreshold")} onMouseDown={function (e) { e.preventDefault(); e.stopPropagation(); if (!effSed || !sedPopRef.current) return; const vis = sedPopRef.current.style.display !== "none"; sedPopRef.current.style.display = vis ? "none" : "block"; if (vis) dismissSedPop(); else { try { localStorage.removeItem(SED_POP_KEY); } catch (err) {} } }} style={{ display: "flex", alignItems: "center", gap: 5, height: 19, padding: "0 8px 0 6px", borderRadius: brutal ? 0 : term ? 3 : 99, flexShrink: 0, fontSize: 9, fontWeight: 600, letterSpacing: 0.2, fontVariantNumeric: "tabular-nums", cursor: effSed ? "pointer" : "default", ...(effSed ? { background: "rgba(255,159,10,0.16)", color: C.amber, animation: "sed-pulse 2.2s ease-in-out infinite" } : { background: C.card, color: C.third }) }}>
         {ICO.chair}<span>{effIdle} min</span>
@@ -999,69 +868,63 @@ function Widget({ data, settings, appIdentity, character, onRefresh, onReset, on
       }}
       style={{ display: "flex", alignItems: "center", gap: 6, padding: "0 2px", cursor: "grab" }}
     >
-      {appIdentity && appIdentity.icon ? (
-        <img src={appIdentity.icon} width="20" height="20" style={{ display: "block", flexShrink: 0, borderRadius: brutal ? 0 : term ? 3 : 5, objectFit: "cover", boxShadow: brutal || term ? "none" : "0 1px 3px rgba(0,0,0,0.22)" }} alt="" />
-      ) : (
-        <svg width="20" height="20" viewBox="0 0 24 24" style={{ display: "block", flexShrink: 0 }}>
-          <defs>
-            <linearGradient id="hd-bg" x1="0" y1="0" x2="1" y2="1">
-              <stop offset="0%" stopColor="#1D2642" />
-              <stop offset="100%" stopColor="#0A0D18" />
-            </linearGradient>
-            <linearGradient id="hd-r1" x1="0" y1="0" x2="1" y2="1">
-              <stop offset="0%" stopColor="#FF2D69" />
-              <stop offset="100%" stopColor="#FF8C42" />
-            </linearGradient>
-            <linearGradient id="hd-r2" x1="0" y1="0" x2="1" y2="1">
-              <stop offset="0%" stopColor="#20D670" />
-              <stop offset="100%" stopColor="#86F866" />
-            </linearGradient>
-            <linearGradient id="hd-r3" x1="0" y1="0" x2="1" y2="1">
-              <stop offset="0%" stopColor="#0A84FF" />
-              <stop offset="100%" stopColor="#56E2FF" />
-            </linearGradient>
-          </defs>
-          <rect x="1" y="1" width="22" height="22" rx={brutal || isPixel(styleId) ? "0" : term ? "3" : "6"} fill="url(#hd-bg)" stroke="rgba(255,255,255,0.28)" strokeWidth="0.8" />
-          <g transform="translate(12,12) rotate(-90)" fill="none" strokeLinecap="round">
-            <circle r="7.6" stroke="rgba(255,55,95,0.18)" strokeWidth="1.9" />
-            <circle r="5.1" stroke="rgba(48,209,88,0.18)" strokeWidth="1.9" />
-            <circle r="2.6" stroke="rgba(10,132,255,0.18)" strokeWidth="1.9" />
-            <circle r="7.6" stroke="url(#hd-r1)" strokeWidth="1.9" strokeDasharray="47.75" strokeDashoffset="8.5" />
-            <circle r="5.1" stroke="url(#hd-r2)" strokeWidth="1.9" strokeDasharray="32.04" strokeDashoffset="7.2" />
-            <circle r="2.6" stroke="url(#hd-r3)" strokeWidth="1.9" strokeDasharray="16.34" strokeDashoffset="4.5" />
-          </g>
-        </svg>
-      )}
+      <svg width="20" height="20" viewBox="0 0 100 100" style={{ display: "block", flexShrink: 0 }}>
+        <defs>
+          <linearGradient id="hd-fb-bg" x1="0" y1="0" x2="1" y2="1">
+            <stop offset="0%" stopColor="#0E222A" />
+            <stop offset="100%" stopColor="#071218" />
+          </linearGradient>
+          <linearGradient id="hd-fb-dot" x1="0" y1="0" x2="1" y2="1">
+            <stop offset="0%" stopColor="#48F7E8" />
+            <stop offset="100%" stopColor="#00B0B9" />
+          </linearGradient>
+        </defs>
+        <rect x="4" y="4" width="92" height="92" rx={brutal || isPixel(styleId) ? "0" : term ? "12" : "22"} fill="url(#hd-fb-bg)" stroke="rgba(72,247,232,0.28)" strokeWidth="2.5" />
+        {/* Fitbit Air 经典点阵菱形 */}
+        <g fill="url(#hd-fb-dot)">
+          <circle cx="50" cy="24" r="4.8" />
+          <circle cx="38" cy="37" r="4.8" />
+          <circle cx="50" cy="37" r="5.2" />
+          <circle cx="62" cy="37" r="4.8" />
+          <circle cx="26" cy="50" r="4.6" />
+          <circle cx="38" cy="50" r="5.2" />
+          <circle cx="50" cy="50" r="5.8" />
+          <circle cx="62" cy="50" r="5.2" />
+          <circle cx="74" cy="50" r="4.6" />
+          <circle cx="38" cy="63" r="4.8" />
+          <circle cx="50" cy="63" r="5.2" />
+          <circle cx="62" cy="63" r="4.8" />
+          <circle cx="50" cy="76" r="4.8" />
+        </g>
+      </svg>
       <span style={{ fontSize: 11, fontWeight: 700, color: C.label, letterSpacing: 0.1, ...(brutal ? { fontFamily: "Georgia, 'Times New Roman', serif" } : {}) }}>
-        {(appIdentity && appIdentity.name) || (settings && settings.app_name) || T("appTitle")}
+        {T("appTitle")}
       </span>
       {term && <span className="hd-cursor" style={{ display: "inline-block", width: 7, height: 12, background: C.label, verticalAlign: "text-bottom", flexShrink: 0 }} />}
       <div style={{ flex: 1 }} />
       {ballWrap}
       {idleChipWithPop}
       {batteryChip}
-      <span
-        title={
-          syncStale
-            ? T("staleSyncTip", { dev: deviceName, m: syncAgeMin != null ? syncAgeMin : "120+" })
-            : T("lastSyncTip", { dev: deviceName, t: lastSyncTime || fmtTime(now) })
-        }
-        style={{
-          fontSize: 9,
-          fontWeight: syncStale ? 700 : 500,
-          color: syncStale ? C.amber : C.third,
-          fontVariantNumeric: "tabular-nums",
-          display: "inline-flex",
-          alignItems: "center",
-          gap: 3,
-          cursor: "default",
-        }}
-      >
-        {syncStale && <span style={{ width: 5, height: 5, borderRadius: "50%", background: C.amber, display: "inline-block" }} />}
-        {lastSyncTime || fmtTime(now)}
-      </span>
+      {syncStale && (
+        <span
+          title={T("staleSyncTip", { dev: deviceName, m: syncAgeMin != null ? syncAgeMin : "120+" })}
+          style={{
+            fontSize: 9,
+            fontWeight: 700,
+            color: C.amber,
+            fontVariantNumeric: "tabular-nums",
+            display: "inline-flex",
+            alignItems: "center",
+            gap: 3,
+            cursor: "default",
+          }}
+        >
+          <span style={{ width: 5, height: 5, borderRadius: "50%", background: C.amber, display: "inline-block" }} />
+          {lastSyncTime || fmtTime(now)}
+        </span>
+      )}
       {/* 设置入口已移至菜单栏 */}
-      <div data-tauri-drag-region="false" className="hd-refresh-btn" onMouseDown={function (e) { e.preventDefault(); e.stopPropagation(); if (e.button !== 0) return; onRefresh(); }} title={T("refreshTitle")} style={{ width: 20, height: 20, borderRadius: brutal ? 0 : term ? 3 : "50%", background: brutal ? C.glassCtl : term ? "transparent" : C.glassCtl, border: brutal ? "2px solid " + C.hairline : term ? "1px solid " + C.hairline : "none", boxShadow: brutal || term || isPixel(styleId) ? "none" : "inset 0 0.5px 0 " + C.rim, display: "flex", alignItems: "center", justifyContent: "center", cursor: "pointer", flexShrink: 0, color: C.second }}>
+      <div data-tauri-drag-region="false" className="hd-refresh-btn" onMouseDown={function (e) { e.preventDefault(); e.stopPropagation(); if (e.button !== 0) return; onRefresh(); }} title={`${T("refreshTitle")} · ${T("lastSyncTip", { dev: deviceName, t: lastSyncTime || fmtTime(now) })}`} style={{ width: 20, height: 20, borderRadius: brutal ? 0 : term ? 3 : "50%", background: brutal ? C.glassCtl : term ? "transparent" : C.glassCtl, border: brutal ? "2px solid " + C.hairline : term ? "1px solid " + C.hairline : "none", boxShadow: brutal || term || isPixel(styleId) ? "none" : "inset 0 0.5px 0 " + C.rim, display: "flex", alignItems: "center", justifyContent: "center", cursor: "pointer", flexShrink: 0, color: C.second }}>
         {ICO.refresh}
       </div>
     </div>
@@ -1100,17 +963,16 @@ function Widget({ data, settings, appIdentity, character, onRefresh, onReset, on
     }
     return {
       width: "100%", height: "100%", boxSizing: "border-box", padding: "12px 14px",
-      // 圆角统一 36px：与系统 NSVisualEffectView / NSGlassEffectView 的 setCornerRadius(36) 完全一致
-      borderRadius: "36px",
+      // 圆角统一 24px（对齐 macOS 原生小组件规范）：与系统 NSVisualEffectView / NSGlassEffectView 一致
+      borderRadius: "24px",
       display: "flex", flexDirection: "column",
-      // 玻璃模糊由系统底层提供；前端叠加左上 135° 镜面受光柔光晕（不调用 backdrop-filter，零闪烁风险）
-      background: "radial-gradient(125% 80% at 16% 0%, " + C.rimSoft + " 0%, rgba(255,255,255,0) 58%), " + C.bg,
-      // 135° 斜向液态玻璃折射内棱：左上受光顶棱 + 左侧微亮棱 + 右下背光微反光 + 底部暗收口
+      // 内部保持极清澈透明（不叠白雾，让系统底层磨砂与壁纸质感透出来）
+      background: C.bg,
+      // 仅在边缘做极细折光棱线，无任何阴影
       boxShadow:
         "inset 0 1px 0 " + C.rim +
         ", inset 1px 0 0 " + C.rimSoft +
-        ", inset -0.5px -0.5px 0 " + C.rimSoft +
-        ", inset 0 -1px 0 rgba(0,0,0,0.14)",
+        ", inset -0.5px -0.5px 0 " + C.rimSoft,
       overflow: "hidden", position: "relative",
     };
   })();
@@ -1130,17 +992,32 @@ function Widget({ data, settings, appIdentity, character, onRefresh, onReset, on
       if (t.date) map[t.date] = { ...map[t.date], ...t };
       const dates = Object.keys(map).sort().slice(-7);
       return dates.map((d) => ({
+        ...map[d],
         date: d,
         steps: map[d].steps || 0,
         sleep_asleep_min: map[d].sleep_asleep_min || 0,
       }));
     }, [t, data.history]);
 
-    const metrics = [
-      { label: hrLabel, value: hrVal, unit: T("bpm"), color: C.red },
-      { label: T("hrv"), value: hrv, unit: T("ms"), color: C.blue },
-      { label: T("spo2"), value: spo2, unit: T("pct"), color: C.teal },
-      { label: T("resp"), value: resp, unit: T("perMin"), color: C.indigo },
+    const hasNightMetrics = (hrv != null || spo2 != null || resp != null || sleep > 0);
+    const hrRangeVal = (t.hr_min != null && t.hr_max != null) ? `${t.hr_min}–${t.hr_max}` : null;
+    const totSedMin = t.total_sedentary_min != null ? Number(t.total_sedentary_min) : null;
+    const totSitVal = totSedMin != null ? (totSedMin >= 60 ? (totSedMin / 60).toFixed(1) : totSedMin) : null;
+    const totSitUnit = totSedMin != null && totSedMin >= 60 ? "h" : T("minUnit");
+    const exMin = t.exercise_min != null ? Number(t.exercise_min) : 0;
+    const dayCol4 = exMin > 0
+      ? { key: "exercise", label: T("workout"), value: exMin, unit: t.exercise_name || T("minUnit"), color: C.green }
+      : { key: "calories", label: T("kcal").toUpperCase(), value: calories, unit: T("kcal"), color: C.amber };
+
+    const metrics = hasNightMetrics ? [
+      { key: "hr", label: hrLabel, value: hrVal, unit: T("bpm"), color: C.red },
+      { key: "hrv", label: T("hrv"), value: hrv, unit: T("ms"), color: C.blue },
+      { key: "spo2", label: T("spo2"), value: spo2, unit: T("pct"), color: C.teal },
+      { key: "resp", label: T("resp"), value: resp, unit: T("perMin"), color: C.indigo },
+    ] : [
+      { key: "hr", label: hrLabel, value: hrVal, unit: T("bpm"), color: C.red },
+      { key: "total_sed", label: T("totalSitting"), value: totSitVal, unit: totSitUnit, color: C.indigo },
+      dayCol4,
     ];
     const sleepStages = [
       { k: "awake", v: t.sleep_awake_min || 0, c: "rgba(152,152,157,0.55)" },
@@ -1149,14 +1026,15 @@ function Widget({ data, settings, appIdentity, character, onRefresh, onReset, on
       { k: "deep", v: t.sleep_deep_min || 0, c: C.indigo },
     ];
     const sleepTotal = sleepStages.reduce(function (a, p) { return a + (p.v || 0); }, 0);
+    const useHrZoneBar = false;
     // 圆点指示提示来源：绿色 = LLM 生效（AI tip / 正在分析），蓝色 = LLM 未配置或失败、回落到本地静态提示池
     const tipDot = bottomTip ? C.green : C.blue;
     const fallbackPool = effSed ? SEDENTARY_TIPS : FALLBACK_TIPS;
     const fallbackTip = fallbackPool[Math.floor(Date.now() / 60000) % fallbackPool.length];
     const tipText = cleanTip(bottomTip) || fallbackTip;
-    const distStr = distance != null ? distance.toFixed(1) + "km" : "—";
+    const distStr = distance != null ? distance.toFixed(1) + " km" : "—";
     const calStr = calories != null ? calories + " " + T("kcal") : "";
-    const midLine = T("stepsUnit") + " · " + T("distance") + " " + distStr + (calStr ? " · " + calStr : "");
+    const midLine = distStr + (calStr ? " · " + calStr : "");
 
     // 7 日均值差值格式化
     const fmtDelta = (cur, avgVal, unit = "") => {
@@ -1166,45 +1044,311 @@ function Widget({ data, settings, appIdentity, character, onRefresh, onReset, on
       return `${sign}${d}${unit}`;
     };
 
-    const maxBarSteps = Math.max(
-      stepGoal,
-      ...dailySeries.map((x) => Number(x.steps || 0))
+    const trendCfgMap = {
+      steps: {
+        title: T("stepsUnit"),
+        color: C.green,
+        val: (x) => (x.steps != null ? Number(x.steps) : null),
+        fmt: (v) => (v == null ? "—" : v >= 1000 ? (v / 1000).toFixed(1) + "k" : String(Math.round(v))),
+        minMax: stepGoal,
+      },
+      hr: {
+        title: hrLabel,
+        color: C.red,
+        val: (x) => (x.hr_avg ?? x.resting_hr ?? x.heart_rate ?? null),
+        fmt: (v) => (v == null ? "—" : String(Math.round(v))),
+      },
+      hr_range: {
+        title: T("hrRange"),
+        color: C.blue,
+        val: (x) => (x.hr_max ?? x.hr_avg ?? x.heart_rate ?? null),
+        fmt: (v, x) => (x && x.hr_min != null && x.hr_max != null ? `${x.hr_min}-${x.hr_max}` : v == null ? "—" : String(Math.round(v))),
+      },
+      hrv: {
+        title: T("hrv"),
+        color: C.blue,
+        val: (x) => (x.hrv != null ? Number(x.hrv) : null),
+        fmt: (v) => (v == null ? "—" : String(Math.round(v))),
+      },
+      spo2: {
+        title: T("spo2"),
+        color: C.teal,
+        val: (x) => (x.spo2 != null ? Number(x.spo2) : null),
+        fmt: (v) => (v == null ? "—" : v + "%"),
+      },
+      resp: {
+        title: T("resp"),
+        color: C.indigo,
+        val: (x) => (x.respiratory_rate != null ? Number(x.respiratory_rate) : null),
+        fmt: (v) => (v == null ? "—" : String(v)),
+      },
+      total_sed: {
+        title: T("totalSitting"),
+        color: C.indigo,
+        val: (x) => (x.total_sedentary_min != null ? Number(x.total_sedentary_min) : null),
+        fmt: (v) => (v == null ? "—" : v >= 60 ? (v / 60).toFixed(1) + "h" : v + "m"),
+      },
+      exercise: {
+        title: useHrZoneBar ? T("hrZones") : T("workout"),
+        color: C.green,
+        val: (x) => (x.exercise_min != null && x.exercise_min > 0 ? Number(x.exercise_min) : (x.active_minutes != null ? Number(x.active_minutes) : null)),
+        fmt: (v) => (v == null ? "—" : Math.round(v) + "m"),
+      },
+      calories: {
+        title: T("kcal").toUpperCase(),
+        color: C.amber,
+        val: (x) => (x.calories != null ? Number(x.calories) : null),
+        fmt: (v) => (v == null ? "—" : v >= 1000 ? (v / 1000).toFixed(1) + "k" : String(Math.round(v))),
+      },
+      sleep: {
+        title: T("sleep"),
+        color: C.indigo,
+        val: (x) => (x.sleep_asleep_min != null && x.sleep_asleep_min > 0 ? Number(x.sleep_asleep_min) : null),
+        fmt: (v) => (v == null ? "—" : (v / 60).toFixed(1) + "h"),
+      },
+    };
+    const activeTrend = trendMetric ? (trendCfgMap[trendMetric] || trendCfgMap.steps) : null;
+    const trendSeries = dailySeries.length ? dailySeries : [{ ...t, date: t.date || "—", steps }];
+    const trendMaxVal = activeTrend
+      ? Math.max(activeTrend.minMax || 1, ...trendSeries.map((x) => Number(activeTrend.val(x) || 0)))
+      : 1;
+    const trendSwitchKeys = ["steps", ...metrics.map((m) => m.key), ...(sleepTotal > 0 ? ["sleep"] : [])].filter(
+      (k, idx, arr) => trendCfgMap[k] && arr.indexOf(k) === idx
     );
 
+    const isLiquidGlass = !brutal && !term && !isPixel(styleId);
     return (
-      <div style={Object.assign({}, glassStyle, { display: "flex", flexDirection: "column", gap: 8 })}>
+      <div
+        ref={glassRef}
+        className={isLiquidGlass ? "hd-glass-host" : undefined}
+        onMouseDownCapture={isLiquidGlass ? spawnRipple : undefined}
+        onMouseMove={isLiquidGlass ? (e) => {
+          const el = glassRef.current;
+          if (!el) return;
+          const r = el.getBoundingClientRect();
+          el.style.setProperty("--mx", (e.clientX - r.left) + "px");
+          el.style.setProperty("--my", (e.clientY - r.top) + "px");
+        } : undefined}
+        style={Object.assign({}, glassStyle, { display: "flex", flexDirection: "column", gap: sleepTotal > 0 ? 8 : 10 })}
+      >
+        {isLiquidGlass && <div className="hd-glass-caustics" />}
+        {isLiquidGlass && <div className="hd-glass-rim" />}
+        {isLiquidGlass && ripples.map((rp) => (
+          <div key={rp.id} className="hd-liquid-ripple" style={{ left: rp.x, top: rp.y }} />
+        ))}
+        {Array.isArray(snapEdges) && snapEdges.map((edge, idx) => {
+          const posStyle =
+            edge === "left"   ? { left: 0, top: 18, bottom: 18, width: 2, background: `linear-gradient(180deg, transparent, ${C.teal}, transparent)` } :
+            edge === "right"  ? { right: 0, top: 18, bottom: 18, width: 2, background: `linear-gradient(180deg, transparent, ${C.teal}, transparent)` } :
+            edge === "top"    ? { top: 0, left: 18, right: 18, height: 2, background: `linear-gradient(90deg, transparent, ${C.teal}, transparent)` } :
+                                { bottom: 0, left: 18, right: 18, height: 2, background: `linear-gradient(90deg, transparent, ${C.teal}, transparent)` };
+          return <div key={edge + idx} className="hd-snap-edge" style={posStyle} />;
+        })}
         {header}
-        {showTrend ? (
+        {activeTrend ? (
           <div
+            key={"trend-" + trendMetric}
             className="hd-view-enter hd-click-area"
-            onClick={() => setShowTrend(false)}
+            onClick={() => setTrendMetric(null)}
             title={T("trendHint")}
             style={{ flex: 1, display: "flex", flexDirection: "column", justifyContent: "space-between", padding: "2px 4px", cursor: "pointer" }}
           >
-            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
-              <span style={{ fontSize: 10, fontWeight: 700, color: C.label }}>{T("trendTitle")}</span>
-              <span style={{ fontSize: 9, color: C.third }}>✕</span>
-            </div>
-            {/* 7 日步数迷你柱状图 */}
-            <div style={{ display: "flex", alignItems: "flex-end", gap: 6, height: 68, padding: "6px 4px 2px", borderBottom: "1px solid " + C.hairline }}>
-              {(dailySeries.length ? dailySeries : [{ date: t.date || "—", steps }]).map((item, idx, arr) => {
-                const sVal = Number(item.steps || 0);
-                const hPct = Math.max(8, Math.round((sVal / Math.max(1, maxBarSteps)) * 100));
-                const isToday = idx === arr.length - 1;
-                const hit = sVal >= stepGoal;
-                const barColor = isToday ? C.green : hit ? C.teal : C.third;
-                const dayLbl = (item.date || "").slice(5);
-                return (
-                  <div key={item.date || idx} style={{ flex: 1, display: "flex", flexDirection: "column", alignItems: "center", gap: 3, height: "100%", justifyContent: "flex-end" }}>
-                    <span style={{ fontSize: 7.5, color: isToday ? C.label : C.third, fontVariantNumeric: "tabular-nums" }}>
-                      {sVal >= 1000 ? (sVal / 1000).toFixed(1) + "k" : (sVal || "0")}
+            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 4 }}>
+              <div style={{ display: "flex", alignItems: "center", gap: 4, flexWrap: "nowrap", overflow: "hidden" }}>
+                {trendSwitchKeys.map((k) => {
+                  const cfg = trendCfgMap[k];
+                  const act = k === trendMetric;
+                  return (
+                    <span
+                      key={k}
+                      onClick={(e) => { e.stopPropagation(); setTrendMetric(k); }}
+                      style={{
+                        fontSize: 10,
+                        fontWeight: act ? 700 : 500,
+                        padding: "4px 7px",
+                        color: act ? cfg.color : C.third,
+                        opacity: act ? 1 : 0.78,
+                        borderBottom: act ? `2px solid ${cfg.color}` : "2px solid transparent",
+                        transition: "color 0.2s ease, opacity 0.2s ease",
+                        cursor: "pointer",
+                        whiteSpace: "nowrap",
+                      }}
+                    >
+                      {cfg.title}
                     </span>
-                    <div style={{ width: "100%", maxWidth: 22, height: `${hPct}%`, borderRadius: brutal || isPixel(styleId) ? 0 : 4, background: barColor, opacity: isToday ? 1 : 0.72, boxShadow: isToday && !brutal && !term && !isPixel(styleId) ? "0 0 8px rgba(48,209,88,0.35)" : "none" }} />
-                    <span style={{ fontSize: 7.5, color: isToday ? C.label : C.third, fontWeight: isToday ? 700 : 500, fontVariantNumeric: "tabular-nums" }}>{dayLbl}</span>
-                  </div>
-                );
-              })}
+                  );
+                })}
+              </div>
+              <span
+                onClick={(e) => { e.stopPropagation(); setTrendMetric(null); }}
+                style={{ fontSize: 11, color: C.third, padding: "4px 6px", cursor: "pointer", flexShrink: 0 }}
+              >✕</span>
             </div>
+            {/* 7 日顺滑曲线（单调防过冲 + 缺失日虚线连接 + 底部渐隐） */}
+            {(() => {
+              const W = 280, H = 62;
+              const n = trendSeries.length || 1;
+              const vals = trendSeries.map((it, idx, arr) => {
+                const v = activeTrend.val(it);
+                if (v == null) return null;
+                if (idx < arr.length - 1 && Number(v) === 0 && (trendMetric === "steps" || trendMetric === "hr" || trendMetric === "total_sed")) {
+                  return null;
+                }
+                return v;
+              });
+              const nums = vals.filter((v) => v != null).map(Number);
+              const vMax = nums.length ? Math.max(...nums, activeTrend.minMax || 0) : 1;
+              const vMin = nums.length ? Math.min(...nums) : 0;
+              const span = Math.max(1e-6, vMax - vMin);
+              const padMin = nums.length > 1 && vMax > vMin ? vMin - span * 0.14 : vMin * 0.85;
+              const padMax = nums.length > 1 && vMax > vMin ? vMax + span * 0.16 : Math.max(1, vMax * 1.15);
+              const padSpan = Math.max(1e-6, padMax - padMin);
+
+              const pts = vals.map((v, i) => {
+                const x = ((i + 0.5) / n) * W;
+                if (v == null) return null;
+                const ratio = (Number(v) - padMin) / padSpan;
+                const y = H - 7 - Math.max(0, Math.min(1, ratio)) * (H - 16);
+                return { x, y, i };
+              });
+
+              const buildSmoothPath = (seg) => {
+                if (seg.length < 2) return "";
+                let d = `M ${seg[0].x.toFixed(1)} ${seg[0].y.toFixed(1)}`;
+                const t = 0.14; // 克制曲率 + 上下界夹紧，防止过冲
+                for (let k = 0; k < seg.length - 1; k++) {
+                  const p0 = seg[Math.max(0, k - 1)];
+                  const p1 = seg[k];
+                  const p2 = seg[k + 1];
+                  const p3 = seg[Math.min(seg.length - 1, k + 2)];
+                  const minY = Math.min(p1.y, p2.y);
+                  const maxY = Math.max(p1.y, p2.y);
+                  const cp1x = p1.x + (p2.x - p0.x) * t;
+                  const cp1y = Math.max(minY, Math.min(maxY, p1.y + (p2.y - p0.y) * t));
+                  const cp2x = p2.x - (p3.x - p1.x) * t;
+                  const cp2y = Math.max(minY, Math.min(maxY, p2.y - (p3.y - p1.y) * t));
+                  d += ` C ${cp1x.toFixed(1)} ${cp1y.toFixed(1)}, ${cp2x.toFixed(1)} ${cp2y.toFixed(1)}, ${p2.x.toFixed(1)} ${p2.y.toFixed(1)}`;
+                }
+                return d;
+              };
+
+              const segments = [];
+              let curSeg = [];
+              for (let i = 0; i < pts.length; i++) {
+                if (pts[i]) {
+                  curSeg.push(pts[i]);
+                } else if (curSeg.length) {
+                  segments.push(curSeg);
+                  curSeg = [];
+                }
+              }
+              if (curSeg.length) segments.push(curSeg);
+
+              const gapLines = [];
+              for (let s = 0; s < segments.length - 1; s++) {
+                const a = segments[s][segments[s].length - 1];
+                const b = segments[s + 1][0];
+                gapLines.push({ x1: a.x, y1: a.y, x2: b.x, y2: b.y });
+              }
+
+              const valid = pts.filter(Boolean);
+              const gradId = `hd-line-grad-${trendMetric || "s"}`;
+              const focusIdx = (hoverTrendIdx != null && hoverTrendIdx >= 0 && hoverTrendIdx < trendSeries.length)
+                ? hoverTrendIdx
+                : (trendSeries.length - 1);
+              const focusItem = trendSeries[focusIdx] || {};
+              const focusVal = activeTrend.fmt(vals[focusIdx], focusItem);
+              const firstPt = valid[0];
+              const lastPt = valid[valid.length - 1];
+
+              return (
+                <div
+                  onMouseLeave={() => setHoverTrendIdx(null)}
+                  style={{ display: "flex", flexDirection: "column", gap: 3, padding: "2px 2px 4px", position: "relative", ...(isLiquidGlass ? {} : { borderBottom: "1px solid " + C.hairline }) }}
+                >
+                  {isLiquidGlass && (
+                    <div style={{ position: "absolute", bottom: 0, left: 0, right: 0, height: 1, background: `linear-gradient(90deg, transparent 4%, ${C.hairline} 50%, transparent 96%)`, pointerEvents: "none" }} />
+                  )}
+                  <div style={{ position: "relative", height: 64 }}>
+                    {/* 左上角主数值（悬浮任意列实时显示当日数值） */}
+                    <div style={{ position: "absolute", left: 4, top: 0, zIndex: 2, pointerEvents: "none", display: "flex", alignItems: "baseline", gap: 5 }}>
+                      <span style={{ fontSize: 20, fontWeight: 700, lineHeight: 1, letterSpacing: -0.6, color: C.label, fontVariantNumeric: "tabular-nums" }}>{focusVal}</span>
+                      {hoverTrendIdx != null && (
+                        <span style={{ fontSize: 8.5, color: activeTrend.color, fontWeight: 600 }}>{(focusItem.date || "").slice(5)}</span>
+                      )}
+                    </div>
+                    <svg viewBox={`0 0 ${W} ${H}`} preserveAspectRatio="none" style={{ width: "100%", height: "100%", overflow: "visible", display: "block" }}>
+                      <defs>
+                        <linearGradient id={gradId} x1="0" y1="0" x2="0" y2="1">
+                          <stop offset="0%" stopColor={activeTrend.color} stopOpacity="0.34" />
+                          <stop offset="60%" stopColor={activeTrend.color} stopOpacity="0.10" />
+                          <stop offset="100%" stopColor={activeTrend.color} stopOpacity="0.0" />
+                        </linearGradient>
+                      </defs>
+                      {segments.map((seg, si) => {
+                        if (seg.length >= 2) {
+                          const ld = buildSmoothPath(seg);
+                          const ad = `${ld} L ${seg[seg.length - 1].x.toFixed(1)} ${H} L ${seg[0].x.toFixed(1)} ${H} Z`;
+                          return (
+                            <g key={"seg" + si}>
+                              <path d={ad} fill={`url(#${gradId})`} />
+                              <path d={ld} fill="none" stroke={activeTrend.color} strokeWidth="1.5" vectorEffect="non-scaling-stroke" strokeLinecap="round" strokeLinejoin="round" />
+                            </g>
+                          );
+                        }
+                        const p = seg[0];
+                        return (
+                          <line key={"seg" + si} x1={Math.max(4, p.x - 8)} y1={p.y} x2={Math.min(W - 4, p.x + 8)} y2={p.y} stroke={activeTrend.color} strokeWidth="1.5" vectorEffect="non-scaling-stroke" strokeLinecap="round" />
+                        );
+                      })}
+                      {/* 缺失日（如周六日）用克制直虚线连接 */}
+                      {gapLines.map((g, gi) => (
+                        <line key={"gap" + gi} x1={g.x1.toFixed(1)} y1={g.y1.toFixed(1)} x2={g.x2.toFixed(1)} y2={g.y2.toFixed(1)} stroke={activeTrend.color} strokeOpacity="0.45" strokeWidth="1.1" strokeDasharray="3 3" vectorEffect="non-scaling-stroke" />
+                      ))}
+                      {firstPt && valid.length >= 2 && (
+                        <circle cx={firstPt.x} cy={firstPt.y} r="2.6" fill={activeTrend.color} />
+                      )}
+                      {lastPt && (
+                        <circle cx={lastPt.x} cy={lastPt.y} r="2.8" fill={activeTrend.color} />
+                      )}
+                      {hoverTrendIdx != null && pts[hoverTrendIdx] && hoverTrendIdx !== 0 && hoverTrendIdx !== pts.length - 1 && (
+                        <circle cx={pts[hoverTrendIdx].x} cy={pts[hoverTrendIdx].y} r="2.4" fill={activeTrend.color} />
+                      )}
+                    </svg>
+                    {/* 透明悬浮感应列 */}
+                    <div style={{ position: "absolute", inset: 0, display: "flex", zIndex: 3 }}>
+                      {trendSeries.map((_, idx) => (
+                        <div key={idx} onMouseEnter={() => setHoverTrendIdx(idx)} style={{ flex: 1, height: "100%" }} />
+                      ))}
+                    </div>
+                  </div>
+                  {/* 底部极简星期 + 日期号（如 周二 / 24） */}
+                  <div style={{ display: "flex", paddingTop: 2 }}>
+                    {trendSeries.map((item, idx, arr) => {
+                      const isToday = idx === arr.length - 1;
+                      const dayNum = (item.date || "").slice(8);
+                      let wkLbl = "";
+                      let isWeekend = false;
+                      if (item.date && /^\d{4}-\d{2}-\d{2}$/.test(item.date)) {
+                        const [yy, mm, dd] = item.date.split("-").map(Number);
+                        const wd = new Date(yy, mm - 1, dd).getDay();
+                        isWeekend = (wd === 0 || wd === 6);
+                        const isEn = settings && settings.language === "en";
+                        wkLbl = isEn
+                          ? ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"][wd]
+                          : ["周日", "周一", "周二", "周三", "周四", "周五", "周六"][wd];
+                      }
+                      return (
+                        <div key={item.date || idx} style={{ flex: 1, display: "flex", flexDirection: "column", alignItems: "center", lineHeight: 1.2 }}>
+                          <span style={{ fontSize: 9, color: isToday ? activeTrend.color : isWeekend ? C.amber : C.second, fontWeight: isToday ? 700 : 600 }}>{wkLbl || "—"}</span>
+                          <span style={{ fontSize: 8, color: isToday ? C.label : C.third, opacity: 0.85, fontVariantNumeric: "tabular-nums" }}>{dayNum}</span>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              );
+            })()}
             {/* 今日 vs 7日均值 4格对比 */}
             <div style={{ display: "flex", padding: "4px 0" }}>
               {[
@@ -1221,12 +1365,12 @@ function Widget({ data, settings, appIdentity, character, onRefresh, onReset, on
             </div>
           </div>
         ) : (
-          <div className="hd-view-enter" style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+          <div className="hd-view-enter" style={{ flex: 1, display: "flex", flexDirection: "column", justifyContent: sleepTotal > 0 ? "space-between" : "space-evenly", gap: sleepTotal > 0 ? 6 : 8 }}>
             <div
-              className="hd-click-area"
-              onClick={() => setShowTrend(true)}
+              className={isLiquidGlass ? "hd-click-area hd-steps-cell" : "hd-click-area"}
+              onClick={() => setTrendMetric("steps")}
               title={T("trendHint")}
-              style={{ display: "flex", alignItems: "flex-end", justifyContent: "space-between", padding: "0 4px", position: "relative", cursor: "pointer", borderRadius: 8 }}
+              style={{ display: "flex", alignItems: "flex-end", justifyContent: "space-between", padding: "0 4px", position: "relative", cursor: "pointer", borderRadius: 12 }}
             >
               <div style={{ display: "flex", flexDirection: "column" }}>
                 <div style={{ display: "flex", alignItems: "baseline", gap: 7 }}>
@@ -1246,27 +1390,33 @@ function Widget({ data, settings, appIdentity, character, onRefresh, onReset, on
               </div>
             </div>
             <div style={{ height: 4.5, borderRadius: brutal || isPixel(styleId) ? 0 : 99, background: C.card, boxShadow: brutal || term || isPixel(styleId) ? "none" : "inset 0 0.5px 1px rgba(0,0,0,0.16)", overflow: "hidden", position: "relative" }}>
-              <div style={{ height: "100%", borderRadius: brutal || isPixel(styleId) ? 0 : 99, width: stepPct + "%", background: "linear-gradient(90deg, #5CE68B 0%, #30D158 60%, #9EFFB8 100%)", boxShadow: brutal || term || isPixel(styleId) ? "none" : "0 0 8px rgba(48,209,88,0.38)", transition: "width .45s cubic-bezier(.2,.8,.2,1)" }} />
+              <div className={goalDone && isLiquidGlass ? "hd-goal-bar-shimmer" : undefined} style={{ height: "100%", borderRadius: brutal || isPixel(styleId) ? 0 : 99, width: stepPct + "%", background: "linear-gradient(90deg, #5CE68B 0%, #30D158 60%, #9EFFB8 100%)", boxShadow: brutal || term || isPixel(styleId) ? "none" : "0 0 8px rgba(48,209,88,0.38)", transition: "width .45s cubic-bezier(.2,.8,.2,1)" }} />
             </div>
             <div
-              className="hd-click-area"
-              onClick={() => setShowTrend(true)}
-              title={T("trendHint")}
               style={{
                 display: "flex",
-                padding: "7px 0",
-                borderTop: "1px solid " + C.hairline,
-                borderBottom: "1px solid " + C.hairline,
+                padding: sleepTotal > 0 ? "7px 0" : "9px 0",
+                ...(isLiquidGlass
+                  ? {}
+                  : { borderTop: "1px solid " + C.hairline, borderBottom: "1px solid " + C.hairline }),
                 position: "relative",
-                cursor: "pointer",
               }}
             >
+              {isLiquidGlass && (
+                <>
+                  <div style={{ position: "absolute", top: 0, left: 0, right: 0, height: 1, background: `linear-gradient(90deg, transparent 4%, ${C.hairline} 50%, transparent 96%)`, pointerEvents: "none" }} />
+                  <div style={{ position: "absolute", bottom: 0, left: 0, right: 0, height: 1, background: `linear-gradient(90deg, transparent 4%, ${C.hairline} 50%, transparent 96%)`, pointerEvents: "none" }} />
+                </>
+              )}
               {metrics.map(function (m, i) {
                 const empty = m.value == null;
                 const softDivider = !brutal && !term && !isPixel(styleId);
                 return (
                   <div
-                    key={i}
+                    key={m.key || i}
+                    className={isLiquidGlass ? "hd-click-area hd-metric-cell" : "hd-click-area"}
+                    onClick={() => setTrendMetric(m.key)}
+                    title={`${m.label} · ${T("trendHint")}`}
                     style={{
                       flex: 1,
                       display: "flex",
@@ -1274,29 +1424,42 @@ function Widget({ data, settings, appIdentity, character, onRefresh, onReset, on
                       alignItems: "center",
                       gap: 2,
                       position: "relative",
+                      cursor: "pointer",
                       ...(i > 0 && !softDivider ? { borderLeft: "1px solid " + C.hairline } : {}),
                     }}
                   >
                     {i > 0 && softDivider && (
                       <div style={{ position: "absolute", left: 0, top: "12%", bottom: "12%", width: 1, background: "linear-gradient(180deg, transparent, " + C.hairline + ", transparent)" }} />
                     )}
-                    <span style={{ fontSize: 8, color: C.third, fontWeight: 500, letterSpacing: 0.3 }}>{m.label}</span>
-                    <span style={{ fontSize: 15, fontWeight: 600, color: empty ? C.third : m.color, opacity: empty ? 0.28 : 1, letterSpacing: -0.3, fontVariantNumeric: "tabular-nums" }}>{empty ? "—" : m.value}</span>
-                    <span style={{ fontSize: 7.5, color: C.third, fontWeight: 500, opacity: empty ? 0.45 : 0.85 }}>{m.unit}</span>
+                    <span style={{ display: "inline-flex", alignItems: "center", gap: 4, fontSize: 9, color: C.third, fontWeight: 500, letterSpacing: 0.2 }}>
+                      <span style={{ width: 4.5, height: 4.5, borderRadius: "50%", background: empty ? C.third : m.color, opacity: empty ? 0.3 : 0.9 }} />
+                      {m.label}
+                    </span>
+                    <div style={{ display: "flex", alignItems: "baseline", gap: 2.5 }}>
+                      <span style={{ fontSize: 18, fontWeight: 700, lineHeight: 1.1, color: empty ? C.third : C.label, opacity: empty ? 0.3 : 1, letterSpacing: -0.5, fontVariantNumeric: "tabular-nums" }}>{empty ? "—" : m.value}</span>
+                      {!empty && <span style={{ fontSize: 9, color: C.third, fontWeight: 500 }}>{m.unit}</span>}
+                    </div>
                   </div>
                 );
               })}
             </div>
-            <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "0 2px", position: "relative" }}>
-              <span style={{ fontSize: 9, color: C.third, fontWeight: 500, flexShrink: 0 }}>{T("sleep")}</span>
-              <span style={{ fontSize: 12, fontWeight: 600, color: C.label, opacity: sleep ? 1 : 0.32, fontVariantNumeric: "tabular-nums", flexShrink: 0 }}>{fmtSleep(sleep) || "—"}</span>
-              <div style={{ flex: 1, height: 4.5, borderRadius: brutal || isPixel(styleId) ? 0 : 99, overflow: "hidden", display: "flex", gap: sleepTotal && !brutal && !isPixel(styleId) ? 2 : 0 }}>
-                {(sleepTotal ? sleepStages.filter((p) => p.v > 0) : [{ k: "x", v: 1, c: C.card }]).map(function (p) {
-                  return <div key={p.k} style={{ flex: Math.max(p.v, 0.001), background: p.c, height: "100%", borderRadius: brutal || isPixel(styleId) ? 0 : 99 }} />;
-                })}
+            {sleepTotal > 0 && (
+              <div
+                className="hd-click-area"
+                onClick={() => setTrendMetric("sleep")}
+                title={T("trendHint")}
+                style={{ display: "flex", alignItems: "center", gap: 8, padding: "0 2px", position: "relative", cursor: "pointer" }}
+              >
+                <span style={{ fontSize: 9, color: C.third, fontWeight: 500, flexShrink: 0 }}>{T("sleep")}</span>
+                <span style={{ fontSize: 12, fontWeight: 600, color: C.label, fontVariantNumeric: "tabular-nums", flexShrink: 0 }}>{fmtSleep(sleep) || "—"}</span>
+                <div style={{ flex: 1, height: 4.5, borderRadius: brutal || isPixel(styleId) ? 0 : 99, overflow: "hidden", display: "flex", gap: !brutal && !isPixel(styleId) ? 2 : 0 }}>
+                  {sleepStages.filter((p) => p.v > 0).map(function (p) {
+                    return <div key={p.k} style={{ flex: Math.max(p.v, 0.001), background: p.c, height: "100%", borderRadius: brutal || isPixel(styleId) ? 0 : 99 }} />;
+                  })}
+                </div>
+                <span style={{ fontSize: 8.5, color: C.third, flexShrink: 0, fontVariantNumeric: "tabular-nums" }}>{t.sleep_deep_min ? T("deepShort") + t.sleep_deep_min + "·REM" + (t.sleep_rem_min || 0) : ""}</span>
               </div>
-              <span style={{ fontSize: 8.5, color: C.third, flexShrink: 0, fontVariantNumeric: "tabular-nums" }}>{t.sleep_deep_min ? T("deepShort") + t.sleep_deep_min + "·REM" + (t.sleep_rem_min || 0) : ""}</span>
-            </div>
+            )}
           </div>
         )}
         {tipText && (
@@ -1435,6 +1598,16 @@ async function genAiTip(data, settings, rolling_averages, character) {
   }
   if (today_.sedentary && (today_.idle_min || 0) >= 30) {
     focusPool.push("久坐提醒：抓住坐太久这件事轻推一把，催对方起身走两步或伸个懒腰");
+  }
+  const minsNow = hr * 60 + now.getMinutes();
+  const goal = (settings && settings.step_goal) ? Number(settings.step_goal) : 8000;
+  if (minsNow >= 18 * 60 + 30 && minsNow <= 19 * 60 + 10 && today_.steps != null) {
+    const rem = goal - Number(today_.steps || 0);
+    if (rem > 0) {
+      focusPool.unshift(`临近下班收尾：今日还差 ${rem} 步达标(${goal})，温柔提醒下班顺路走一走就能凑齐`);
+    } else {
+      focusPool.unshift(`临近下班收尾：今日步数已达标(${today_.steps}步)，给一句轻松的下班肯定`);
+    }
   }
   if (today_.sleep_min && hr < 15) {
     focusPool.push("睡眠感受：结合昨晚睡眠时长顺口关心精力状态");
@@ -1585,6 +1758,53 @@ export default function App() {
       .catch(() => {});
     return () => {
       disposed = true;
+      if (unlisten) unlisten();
+    };
+  }, []);
+
+  // 音乐播放状态监听：检测到系统音频输出时让萌宠跟着律动
+  const [musicPlaying, setMusicPlaying] = useState(false);
+  useEffect(() => {
+    if (!tauriAvailable()) return;
+    let unlisten = null;
+    let disposed = false;
+    invoke("is_audio_playing_cmd").then((p) => { if (!disposed) setMusicPlaying(!!p); }).catch(() => {});
+    import("@tauri-apps/api/event")
+      .then(({ listen }) => listen("music-state", (e) => setMusicPlaying(!!e.payload)))
+      .then((fn) => {
+        if (disposed) fn();
+        else unlisten = fn;
+      })
+      .catch(() => {});
+    return () => {
+      disposed = true;
+      if (unlisten) unlisten();
+    };
+  }, []);
+
+  // 磁吸对齐边缘闪光提示
+  const [snapEdges, setSnapEdges] = useState([]);
+  useEffect(() => {
+    if (!tauriAvailable()) return;
+    let unlisten = null;
+    let disposed = false;
+    let timer = null;
+    import("@tauri-apps/api/event")
+      .then(({ listen }) => listen("snap-aligned", (e) => {
+        const edges = (e && e.payload && Array.isArray(e.payload.edges)) ? e.payload.edges : [];
+        if (!edges.length) return;
+        setSnapEdges(edges);
+        if (timer) clearTimeout(timer);
+        timer = setTimeout(() => setSnapEdges([]), 500);
+      }))
+      .then((fn) => {
+        if (disposed) fn();
+        else unlisten = fn;
+      })
+      .catch(() => {});
+    return () => {
+      disposed = true;
+      if (timer) clearTimeout(timer);
       if (unlisten) unlisten();
     };
   }, []);
@@ -1749,6 +1969,42 @@ export default function App() {
             if (s) { try { dnd = await invoke("is_dnd_active_cmd"); } catch (e) {} }
             if (!dnd && !snoozed2) {
               try { await invoke("show_sed_popover"); } catch (e) {}
+            }
+          }
+        }
+        // 手环低电量静默系统通知（≤ 20%，对齐工作时段与午休/工作日设置，每天最多一次，不发声）
+        const devBat = today.device_battery != null ? Number(today.device_battery) : null;
+        const nowObj = new Date();
+        const hrNow = nowObj.getHours();
+        const minNow = nowObj.getMinutes();
+        const dayNow = nowObj.getDay(); // 0=Sun, 6=Sat
+        const startH = (s && s.notify_start_hour != null) ? Number(s.notify_start_hour) : 10;
+        const endH = (s && s.notify_end_hour != null) ? Number(s.notify_end_hour) : 19;
+        const workdaysOnly = !s || s.workdays_only !== false;
+        const lunchMute = !s || s.lunch_break_mute !== false;
+        const inWorkday = !workdaysOnly || (dayNow >= 1 && dayNow <= 5);
+        const inLunch = lunchMute && (hrNow === 12 || (hrNow === 13 && minNow < 30));
+        const afterStart = startH === 10 ? (hrNow > 10 || (hrNow === 10 && minNow >= 10)) : (hrNow >= startH);
+        const inBatWindow = inWorkday && !inLunch && afterStart && hrNow < endH;
+        if (tauriAvailable() && devBat != null && devBat <= 20 && inBatWindow) {
+          const BAT_KEY = "health-widget-bat-notify-v1";
+          let notifiedToday = false;
+          try {
+            const rec = JSON.parse(localStorage.getItem(BAT_KEY) || "null");
+            notifiedToday = !!(rec && rec.date === today.date);
+          } catch (e) {}
+          if (!notifiedToday) {
+            let dnd = false;
+            if (s) { try { dnd = await invoke("is_dnd_active_cmd"); } catch (e) {} }
+            if (!dnd) {
+              try { localStorage.setItem(BAT_KEY, JSON.stringify({ date: today.date, battery: devBat })); } catch (e) {}
+              try {
+                await invoke("show_battery_notification", {
+                  deviceName: today.device_name || "Fitbit",
+                  battery: devBat,
+                  lang: (s && s.language) || "zh-CN",
+                });
+              } catch (e) {}
             }
           }
         }
@@ -2015,6 +2271,8 @@ export default function App() {
           forceWidgetPop={forceWidgetPop}
           setForceWidgetPop={setForceWidgetPop}
           powerPaused={powerPaused}
+          musicPlaying={musicPlaying}
+          snapEdges={snapEdges}
         />
       ) : (
         <div style={{ width: "100%", height: "100%", display: "flex", alignItems: "center", justifyContent: "center", color: C.third, fontSize: 12 }}>

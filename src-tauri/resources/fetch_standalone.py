@@ -38,8 +38,10 @@ _ARGV.add_argument("--ping",   action="store_true", help="轻量探测：只测 
 _ARGV.add_argument("--loop",   action="store_true")
 _ARGV.add_argument("--sed-min",    type=int, default=45, help="连续不动超过此时长(分钟)判定久坐")
 _ARGV.add_argument("--remind-min", type=int, default=30, help="久坐后每隔多久复查提醒一次(分钟)")
-_ARGV.add_argument("--notify-start", type=int, default=9, help="久坐提醒开始小时(0-23)")
-_ARGV.add_argument("--notify-end",   type=int, default=22, help="久坐提醒结束小时(1-24)")
+_ARGV.add_argument("--notify-start", type=int, default=10, help="久坐提醒开始小时(0-23)")
+_ARGV.add_argument("--notify-end",   type=int, default=19, help="久坐提醒结束小时(1-24)")
+_ARGV.add_argument("--lunch-mute",   action="store_true", help="午休免打扰(12:00-13:30)")
+_ARGV.add_argument("--workdays-only", action="store_true", help="仅工作日(周一至周五)提醒")
 _ARGS = _ARGV.parse_known_args()[0]
 TOKEN_FILE  = _ARGS.token
 CONFIG_FILE = _ARGS.config
@@ -132,26 +134,21 @@ def get_7day_series(history, today_date, today_summary):
         if d in days and entry.get("steps") is not None:
             by_date[d] = entry
     series = []
+    _fields = (
+        "steps", "active_minutes", "calories", "sleep_asleep_min",
+        "resting_hr", "heart_rate", "hr_avg", "hr_min", "hr_max",
+        "hrv", "spo2", "respiratory_rate", "total_sedentary_min", "exercise_min",
+    )
     for d in days:
         e = by_date.get(d, {})
-        series.append({
-            "date": d,
-            "steps": e.get("steps"),
-            "active_minutes": e.get("active_minutes"),
-            "sleep_asleep_min": e.get("sleep_asleep_min"),
-            "resting_hr": e.get("resting_hr"),
-            "hrv": e.get("hrv"),
-            "spo2": e.get("spo2"),
-        })
-    series.append({
-        "date": today_date,
-        "steps": today_summary.get("steps"),
-        "active_minutes": today_summary.get("active_minutes"),
-        "sleep_asleep_min": today_summary.get("sleep_asleep_min"),
-        "resting_hr": today_summary.get("resting_hr"),
-        "hrv": today_summary.get("hrv"),
-        "spo2": today_summary.get("spo2"),
-    })
+        item = {"date": d}
+        for k in _fields:
+            item[k] = e.get(k)
+        series.append(item)
+    today_item = {"date": today_date}
+    for k in _fields:
+        today_item[k] = today_summary.get(k)
+    series.append(today_item)
     return series
 
 # ─── Token 管理 ────────────────────────────────────────────────────────────────
@@ -454,6 +451,85 @@ def fetch_latest_hr():
     except Exception:
         return None, None, None, None
 
+def _parse_sec(s):
+    try:
+        return int(float(str(s or "0").rstrip("s")))
+    except Exception:
+        return 0
+
+def fetch_total_sedentary(today):
+    """今日全天累计静坐总分钟数（sedentary-period dailyRollUp）"""
+    try:
+        r = api_post("sedentary-period", make_range(today))
+        pts = r.get("rollupDataPoints", [])
+        if not pts:
+            return None
+        sec = _parse_sec(pts[0].get("sedentaryPeriod", {}).get("durationSum"))
+        return round(sec / 60) if sec > 0 else 0
+    except Exception:
+        return None
+
+def fetch_hr_summary(today):
+    """今日心率统计（min, max, avg）"""
+    try:
+        r = api_post("heart-rate", make_range(today))
+        pts = r.get("rollupDataPoints", [])
+        if not pts:
+            return None, None, None
+        hr = pts[0].get("heartRate", {})
+        hmin = hr.get("beatsPerMinuteMin")
+        hmax = hr.get("beatsPerMinuteMax")
+        havg = hr.get("beatsPerMinuteAvg")
+        return (
+            int(round(hmin)) if hmin is not None else None,
+            int(round(hmax)) if hmax is not None else None,
+            int(round(havg)) if havg is not None else None,
+        )
+    except Exception:
+        return None, None, None
+
+def fetch_hr_zones(today):
+    """今日全心率区间分布（分钟）：light / moderate / vigorous / peak"""
+    try:
+        r = api_post("time-in-heart-rate-zone", make_range(today))
+        pts = r.get("rollupDataPoints", [])
+        if not pts:
+            return None
+        zones = pts[0].get("timeInHeartRateZone", {}).get("timeInHeartRateZones", [])
+        out = {"light": 0, "moderate": 0, "vigorous": 0, "peak": 0}
+        for z in zones:
+            k = str(z.get("heartRateZone", "")).lower()
+            if k in out:
+                out[k] += round(_parse_sec(z.get("duration")) / 60)
+        return out if sum(out.values()) > 0 else None
+    except Exception:
+        return None
+
+def fetch_today_exercise(today):
+    """今日运动记录汇总：(总分钟数, 最近一次运动名称)"""
+    try:
+        r = api_get("users/me/dataTypes/exercise/dataPoints:reconcile?pageSize=8")
+        total_sec = 0
+        latest_name = ""
+        for pt in r.get("dataPoints", []):
+            ex = pt.get("exercise", {})
+            iv = ex.get("interval", {})
+            st = iv.get("startTime")
+            if not st:
+                continue
+            _, dt_local = cst(st, iv.get("startUtcOffset", "28800s"))
+            if dt_local.strftime("%Y-%m-%d") != today:
+                continue
+            dur = _parse_sec(ex.get("activeDuration"))
+            if dur <= 0:
+                continue
+            total_sec += dur
+            if not latest_name:
+                latest_name = ex.get("displayName") or ex.get("exerciseType") or ""
+        return (round(total_sec / 60) if total_sec > 0 else 0), latest_name
+    except Exception:
+        return 0, ""
+
 def fetch_device_info():
     """
     从 users/me/pairedDevices 获取实体手环（排除 MobileTrack）的真实电池电量与最后同步时间。
@@ -581,6 +657,8 @@ APP_FIELDS = {
     "last_move_time": "",
     "last_steps": 0,
     "computer_away": False,
+    "off_wrist": False,
+    "last_collector_ts": 0,
 }
 
 def preserve_app_fields(today_entry, prev_today):
@@ -604,6 +682,8 @@ SEDENTARY_REMIND_MIN = 30 # 首次提醒后，每隔此时长复查提醒一次(
 STEP_DELTA    = 30        # 步数增加超过此值算"有活动"，重置久坐（80→30：短走也算活动）
 NOTIFY_START_HOUR = 10     # 仅在工作时段发通知(这台 Mac 10:00–19:00 使用)
 NOTIFY_END_HOUR   = 19
+LUNCH_MUTE        = False  # 午休免打扰(12:00-13:30)
+WORKDAYS_ONLY     = False  # 仅工作日(周一至周五)提醒
 USER_ACK_GRACE_MS = 3 * 60 * 1000  # 用户点"站起来了"后 3 分钟宽限，期间不重复弹
 
 # 久坐通知文案池（拟人化/风趣，每次随机抽一条，只提静坐时长）
@@ -715,17 +795,18 @@ def _get_macos_hid_idle_min():
         pass
     return 0
 
-def check_sedentary(today_entry, prev_today, steps, now):
+def check_sedentary(today_entry, prev_today, steps, now, off_wrist=False):
     """
-    步数驱动 + 电脑键鼠活跃协同的久坐检测：
+    步数驱动 + 电脑键鼠活跃协同 + 摘表检测的久坐检测：
     核心原则：
     ── 场景 1：步数增加（≥ STEP_DELTA）→ 确认解除久坐
     ── 场景 2：电脑键鼠空闲 ≥ 20 分钟 → 用户已离开电脑/锁屏/开会（可能没戴表），
                标记 computer_away=True，不误弹久坐提醒；当用户刚回到电脑前（hid_idle < 5）时，
                重置活动基线时间，避免一坐下就被弹窗
-    ── 场景 3：点"站起来了"→ 立刻重置数值（即时反馈），3 分钟后复查步数：
+    ── 场景 3：手环离手（最近有同步但 ≥ 20 分钟无心率）→ 暂停久坐计时；重新佩戴后重置基线
+    ── 场景 4：点"站起来了"→ 立刻重置数值（即时反馈），3 分钟后复查步数：
                步数增加 → 确认解除；步数未变 → 回滚到原始 idle 时间并继续累计
-    ── 场景 4：久坐提醒后用户未操作、步数也未变 → 按 SEDENTARY_REMIND_MIN 间隔复查提醒
+    ── 场景 5：久坐提醒后用户未操作、步数也未变 → 按 SEDENTARY_REMIND_MIN 间隔复查提醒
     返回 (sedentary, idle_min, reminded_this_run)
     """
     def _pick(key, default):
@@ -741,6 +822,68 @@ def check_sedentary(today_entry, prev_today, steps, now):
     steps_at_ack = _pick("steps_at_ack", 0)
     last_move_time_before_ack = _pick("last_move_time_before_ack", "")
     was_away = bool(_pick("computer_away", False))
+    was_off_wrist = bool(_pick("off_wrist", False))
+    was_lunch = bool(_pick("lunch_break", False))
+    last_collector_ts = _pick("last_collector_ts", 0)
+    today_entry["last_collector_ts"] = int(time.time())
+
+    # ── 午休免打扰（12:00–13:30）──
+    in_lunch = bool(LUNCH_MUTE and (now.hour == 12 or (now.hour == 13 and now.minute < 30)))
+    if in_lunch:
+        today_entry["lunch_break"] = True
+        log("  🍱 午休免打扰时段（12:00–13:30），暂停久坐计时")
+        return False, 0, False
+    if was_lunch:
+        log("  ☕ 午休结束，重置下午久坐计时基线")
+        today_entry["lunch_break"] = False
+        today_entry["last_move_time"] = now.strftime("%Y-%m-%d %H:%M:%S")
+        today_entry["last_steps"] = steps
+        today_entry["sedentary_notified"] = False
+        today_entry["follow_up"] = False
+        today_entry["snooze_until"] = 0
+        today_entry["pending_notify"] = False
+        today_entry["remind_event"] = 0
+        today_entry["steps_at_sedentary"] = 0
+        return False, 0, False
+    today_entry["lunch_break"] = False
+
+    # ── 跨天或电脑休眠唤醒保护：防止昨晚/休眠前的 last_move_time 延续导致显示几千分钟不动 ──
+    today_prefix = now.strftime("%Y-%m-%d")
+    sleep_gap_sec = (time.time() - float(last_collector_ts)) if last_collector_ts else 0
+    if (last_move_time and not str(last_move_time).startswith(today_prefix)) or sleep_gap_sec > 30 * 60:
+        log(f"  🌅 检测到跨天或电脑休眠唤醒（gap={int(sleep_gap_sec // 60)}m），重置久坐计时基线")
+        today_entry["last_move_time"] = now.strftime("%Y-%m-%d %H:%M:%S")
+        today_entry["last_steps"] = steps
+        today_entry["sedentary_notified"] = False
+        today_entry["follow_up"] = False
+        today_entry["snooze_until"] = 0
+        today_entry["pending_notify"] = False
+        today_entry["remind_event"] = 0
+        today_entry["steps_at_sedentary"] = 0
+        today_entry["user_acked_time"] = 0
+        today_entry["steps_at_ack"] = 0
+        today_entry["last_move_time_before_ack"] = ""
+        today_entry["computer_away"] = False
+        today_entry["off_wrist"] = bool(off_wrist)
+        return False, 0, False
+
+    if off_wrist:
+        today_entry["off_wrist"] = True
+        log("  ⌚ 手环已摘下/离手（近 20m 无心率），暂停久坐计时")
+        return False, 0, False
+    if was_off_wrist:
+        log("  ⌚ 检测到手环重新佩戴，重置久坐计时基线")
+        today_entry["off_wrist"] = False
+        today_entry["last_move_time"] = now.strftime("%Y-%m-%d %H:%M:%S")
+        today_entry["last_steps"] = steps
+        today_entry["sedentary_notified"] = False
+        today_entry["follow_up"] = False
+        today_entry["snooze_until"] = 0
+        today_entry["pending_notify"] = False
+        today_entry["remind_event"] = 0
+        today_entry["steps_at_sedentary"] = 0
+        return False, 0, False
+    today_entry["off_wrist"] = False
 
     hid_idle_min = _get_macos_hid_idle_min()
     away_threshold = min(max(15, SEDENTARY_MIN // 2), 20)
@@ -852,7 +995,10 @@ def check_sedentary(today_entry, prev_today, steps, now):
         return True, idle_min, False
 
     # 触发提醒（首次 或 复查到期）
-    in_window = NOTIFY_START_HOUR <= now.hour < NOTIFY_END_HOUR
+    # 10:00 开始时给 10 分钟上午弹性缓冲（10:10 后才开始弹窗）
+    start_ok = (now.hour > 10 or (now.hour == 10 and now.minute >= 10)) if NOTIFY_START_HOUR == 10 else (now.hour >= NOTIFY_START_HOUR)
+    workday_ok = (not WORKDAYS_ONLY) or (now.weekday() < 5)
+    in_window = workday_ok and start_ok and (now.hour < NOTIFY_END_HOUR)
     reminded = False
     last_remind = today_entry.get("last_remind_time", 0)
     remind_due = (now_ms - last_remind) >= SEDENTARY_REMIND_MIN * 60 * 1000
@@ -1031,13 +1177,15 @@ def log(msg):
     print(f"[{datetime.now().strftime('%H:%M:%S')}] {msg}", flush=True)
 
 def main():
-    global TOKEN, SEDENTARY_MIN, SEDENTARY_REMIND_MIN, NOTIFY_START_HOUR, NOTIFY_END_HOUR
+    global TOKEN, SEDENTARY_MIN, SEDENTARY_REMIND_MIN, NOTIFY_START_HOUR, NOTIFY_END_HOUR, LUNCH_MUTE, WORKDAYS_ONLY
     TOKEN = load_token()
     # 久坐阈值/提醒间隔/提醒时段由 Tauri 侧 settings 传入，用户改设置后立即生效
     SEDENTARY_MIN = max(5, _ARGS.sed_min)
     SEDENTARY_REMIND_MIN = max(5, _ARGS.remind_min)
     NOTIFY_START_HOUR = max(0, min(23, _ARGS.notify_start))
     NOTIFY_END_HOUR = max(1, min(24, _ARGS.notify_end))
+    LUNCH_MUTE = bool(_ARGS.lunch_mute)
+    WORKDAYS_ONLY = bool(_ARGS.workdays_only)
 
     # 如果 token 仍然过期（刷新失败），不要调 API 覆盖好数据
     if is_token_expired():
@@ -1049,8 +1197,8 @@ def main():
     t_start = time.time()
     log(f"开始并发采集 {today}...")
 
-    # 11 个接口并发拉取（耗时从 4~8s 压到 ~1s）
-    with ThreadPoolExecutor(max_workers=6) as pool:
+    # 15 个接口并发拉取（耗时从 4~8s 压到 ~1s）
+    with ThreadPoolExecutor(max_workers=8) as pool:
         f_steps    = pool.submit(fetch_steps, today)
         f_dist     = pool.submit(fetch_distance, today)
         f_cal      = pool.submit(fetch_calories, today)
@@ -1062,6 +1210,10 @@ def main():
         f_hrv      = pool.submit(fetch_hrv, today)
         f_live_hr  = pool.submit(fetch_latest_hr)
         f_dev      = pool.submit(fetch_device_info)
+        f_tot_sed  = pool.submit(fetch_total_sedentary, today)
+        f_hr_sum   = pool.submit(fetch_hr_summary, today)
+        f_hr_zones = pool.submit(fetch_hr_zones, today)
+        f_ex       = pool.submit(fetch_today_exercise, today)
 
         steps    = f_steps.result()
         distance = f_dist.result()
@@ -1074,6 +1226,10 @@ def main():
         hrv        = f_hrv.result()
         heart_rate, heart_rate_time, hr_sync_age, hr_dev_name = f_live_hr.result()
         dev_info   = f_dev.result()
+        total_sedentary_min = f_tot_sed.result()
+        hr_min, hr_max, hr_avg = f_hr_sum.result()
+        hr_zones   = f_hr_zones.result()
+        exercise_min, exercise_name = f_ex.result()
 
     device_battery = dev_info.get("battery")
     device_battery_status = dev_info.get("status") or ""
@@ -1106,6 +1262,8 @@ def main():
     # 顶层 today 是 App/Rust/前端写入的权威实时态（remind_event、sedentary 等）。
     # check_sedentary 只从 history 条目读基线，会忽略顶层写入；这里读出来作为兜底。
     prev_today = load_current_today()
+    if prev_today.get("date") != today:
+        prev_today = {}
 
     # 2. 生成当前状态快照（用于时间序列对比）
     snapshot = {
@@ -1137,10 +1295,12 @@ def main():
     if rolling_averages:
         log(f"  7日均值: {rolling_averages}")
 
-    # ── 久坐检测 ──
-    sedentary, idle_min, reminded = check_sedentary(today_entry, prev_today, steps, datetime.now())
+    # ── 久坐与摘表检测 ──
+    dev_sync_age = dev_info.get("sync_age_min")
+    off_wrist = bool(hr_sync_age is not None and hr_sync_age >= 20 and dev_sync_age is not None and dev_sync_age < 15)
+    sedentary, idle_min, reminded = check_sedentary(today_entry, prev_today, steps, datetime.now(), off_wrist=off_wrist)
     sync_stale = bool(sync_age_min is not None and sync_age_min >= 120)
-    log(f"  久坐: {'是' if sedentary else '否'} (idle={idle_min}min) | 手环电量: {device_battery}% | 同步状态: {'超时未同步' if sync_stale else '正常'}")
+    log(f"  久坐: {'是' if sedentary else '否'} (idle={idle_min}min, off_wrist={off_wrist}) | 手环电量: {device_battery}% | 同步状态: {'超时未同步' if sync_stale else '正常'}")
 
     # 生成提示
     tip, tip_level = generate_tip(
@@ -1168,6 +1328,13 @@ def main():
         "resting_hr": resting_hr,
         "heart_rate":      heart_rate,
         "heart_rate_time": heart_rate_time,
+        "hr_min":          hr_min,
+        "hr_max":          hr_max,
+        "hr_avg":          hr_avg,
+        "hr_zones":        hr_zones,
+        "total_sedentary_min": total_sedentary_min,
+        "exercise_min":    exercise_min,
+        "exercise_name":   exercise_name,
         "hrv":       hrv,
         "spo2":      spo2,
         "respiratory_rate": resp,
@@ -1182,6 +1349,7 @@ def main():
         "tip_level": tip_level,
         "sedentary": sedentary,
         "idle_min": idle_min,
+        "off_wrist": off_wrist,
         "device_battery": device_battery,
         "device_battery_status": device_battery_status,
         "last_sync_time": last_sync_time or datetime.now().strftime("%H:%M"),
@@ -1209,13 +1377,22 @@ def main():
         log("✅ 已保留上次有效数据，跳过本次写入")
         return
 
-    # 更新历史条目（供下次对比）
+    # 更新历史条目（供下次对比与 7 日单项趋势）
     today_entry.update({
         "steps": steps,
+        "active_minutes": today_data["active_minutes"],
+        "calories": calories,
         "sleep_asleep_min": today_data["sleep_asleep_min"],
         "hrv": hrv,
         "resting_hr": resting_hr,
+        "heart_rate": heart_rate,
+        "hr_avg": hr_avg,
+        "hr_min": hr_min,
+        "hr_max": hr_max,
         "spo2": spo2,
+        "respiratory_rate": resp,
+        "total_sedentary_min": total_sedentary_min,
+        "exercise_min": exercise_min,
     })
     write_data({"today": today_data, "history": history})
     log(f"✅ data.json 已写入 ({today})")

@@ -1,6 +1,6 @@
 [package]
 name = "health-dashboard-tauri"
-version = "3.0.0"
+version = "3.1.0"
 description = "跨平台健康仪表盘小组件 (Tauri + Google Health)"
 edition = "2021"
 rust-version = "1.88"

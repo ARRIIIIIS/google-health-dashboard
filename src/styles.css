@@ -84,19 +84,36 @@ body.hd-refreshing .hd-refresh-btn svg {
   transform: scale(0.90);
 }
 
-/* 主视图 ↔ 7日趋势浮层 丝滑淡入过渡 & 点击区域微交互 */
-@keyframes hd-fade-in {
-  from {
+/* 主视图 ↔ 7日趋势浮层 液态交融过渡（光学虚化聚焦 + 弹性微缩） */
+@keyframes hd-liquid-morph-in {
+  0% {
     opacity: 0;
-    transform: translateY(2px) scale(0.99);
+    filter: blur(8px);
+    transform: scale(0.965);
   }
-  to {
+  100% {
     opacity: 1;
-    transform: none;
+    filter: blur(0px);
+    transform: scale(1);
   }
 }
 .hd-view-enter {
-  animation: hd-fade-in 0.18s cubic-bezier(0.2, 0.8, 0.2, 1) both;
+  animation: hd-liquid-morph-in 0.34s cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+@keyframes hd-bar-liquid-rise {
+  0% {
+    transform: scaleY(0.12);
+    opacity: 0.2;
+  }
+  100% {
+    transform: scaleY(1);
+    opacity: 1;
+  }
+}
+.hd-bar-rise {
+  transform-origin: bottom center;
+  animation: hd-bar-liquid-rise 0.42s cubic-bezier(0.22, 1.15, 0.36, 1) both;
 }
 .hd-click-area {
   transition: opacity 0.15s ease, transform 0.15s cubic-bezier(0.2, 0.8, 0.2, 1);
@@ -118,4 +135,244 @@ body.hd-refreshing .hd-refresh-btn svg {
 }
 .hd-cursor {
   animation: hd-cursor-blink 1.06s steps(1, end) infinite;
+}
+
+/* 液态玻璃：鼠标视差环境反光（极轻光学微光，不泛白、不糊底） */
+.hd-glass-caustics {
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity 0.3s ease;
+  background:
+    radial-gradient(
+      160px circle at var(--mx, 20%) var(--my, 12%),
+      rgba(255, 255, 255, 0.08) 0%,
+      rgba(155, 220, 255, 0.03) 45%,
+      rgba(255, 255, 255, 0) 75%
+    );
+  z-index: 1;
+}
+.hd-glass-host:hover .hd-glass-caustics {
+  opacity: 1;
+}
+
+/* 液态玻璃：1px 棱边折射高光（只在边缘 1px 处亮起，内部完全通透） */
+.hd-glass-rim {
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  padding: 1px;
+  pointer-events: none;
+  opacity: 0.45;
+  transition: opacity 0.28s ease;
+  background:
+    radial-gradient(
+      170px circle at var(--mx, 18%) var(--my, 8%),
+      rgba(255, 255, 255, 0.78) 0%,
+      rgba(155, 225, 255, 0.34) 40%,
+      rgba(255, 255, 255, 0.04) 78%
+    ),
+    linear-gradient(
+      145deg,
+      rgba(255, 255, 255, 0.36) 0%,
+      rgba(255, 255, 255, 0.03) 42%,
+      rgba(160, 220, 255, 0.14) 100%
+    );
+  -webkit-mask: linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0);
+  -webkit-mask-composite: xor;
+  mask-composite: exclude;
+  z-index: 2;
+}
+.hd-glass-host:hover .hd-glass-rim {
+  opacity: 0.95;
+}
+
+/* 液态玻璃：极细边缘弯月面反光（仅贴近顶边 12% 弧线，不发白遮挡内部） */
+.hd-glass-meniscus {
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  pointer-events: none;
+  z-index: 1;
+  background:
+    radial-gradient(82% 16% at 50% -2%, rgba(255, 255, 255, 0.10) 0%, rgba(255, 255, 255, 0) 80%);
+}
+
+/* 液态玻璃：背景状态微光流（极淡、无闪烁、赋予玻璃深度） */
+@keyframes hd-aura-drift {
+  0%, 100% {
+    transform: translate3d(0, 0, 0) scale(1);
+  }
+  50% {
+    transform: translate3d(10px, -6px, 0) scale(1.06);
+  }
+}
+.hd-glass-aura {
+  position: absolute;
+  inset: -20%;
+  pointer-events: none;
+  z-index: 0;
+  animation: hd-aura-drift 12s ease-in-out infinite;
+}
+
+/* 液态玻璃：点击水波纹 / 玻璃涟漪 */
+@keyframes hd-liquid-ripple {
+  0% {
+    transform: translate(-50%, -50%) scale(0.15);
+    opacity: 0.55;
+  }
+  100% {
+    transform: translate(-50%, -50%) scale(2.8);
+    opacity: 0;
+  }
+}
+.hd-liquid-ripple {
+  position: absolute;
+  width: 90px;
+  height: 90px;
+  border-radius: 50%;
+  pointer-events: none;
+  background: radial-gradient(
+    circle,
+    rgba(255, 255, 255, 0.28) 0%,
+    rgba(255, 255, 255, 0.08) 45%,
+    rgba(255, 255, 255, 0) 72%
+  );
+  animation: hd-liquid-ripple 0.58s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+  z-index: 3;
+}
+
+/* 液态玻璃：交互区无边框液态浮光（无胶囊、无分区，纯光学高亮融合） */
+.hd-metric-cell {
+  padding: 2px 2px;
+  transition: transform 0.24s cubic-bezier(0.22, 1, 0.36, 1), filter 0.24s ease;
+}
+.hd-metric-cell:hover {
+  transform: scale(1.04);
+  filter: brightness(1.14);
+}
+.hd-metric-cell:active {
+  transform: scale(0.96);
+}
+
+.hd-steps-cell {
+  transition: transform 0.24s cubic-bezier(0.22, 1, 0.36, 1), filter 0.24s ease;
+}
+.hd-steps-cell:hover {
+  filter: brightness(1.08);
+}
+.hd-steps-cell:active {
+  transform: scale(0.99);
+}
+
+/* 宠物点击弹性反馈（无声微交互） */
+@keyframes hd-pet-bounce {
+  0% {
+    transform: scale(1) translateY(0);
+  }
+  30% {
+    transform: scale(1.12, 0.90) translateY(2px);
+  }
+  60% {
+    transform: scale(0.95, 1.07) translateY(-4px);
+  }
+  82% {
+    transform: scale(1.03, 0.98) translateY(0);
+  }
+  100% {
+    transform: scale(1) translateY(0);
+  }
+}
+.hd-pet-bouncing {
+  animation: hd-pet-bounce 0.44s cubic-bezier(0.22, 1.28, 0.36, 1);
+}
+
+/* 播放音乐时萌宠跟着节拍轻微摇摆律动（无声视觉反馈） */
+@keyframes hd-pet-groove {
+  0%, 100% {
+    transform: translateY(0) rotate(-3deg) scale(1);
+  }
+  25% {
+    transform: translateY(-2.5px) rotate(0deg) scale(1.03, 0.97);
+  }
+  50% {
+    transform: translateY(0) rotate(3deg) scale(1);
+  }
+  75% {
+    transform: translateY(-2.5px) rotate(0deg) scale(1.03, 0.97);
+  }
+}
+.hd-pet-grooving {
+  animation: hd-pet-groove 1.15s ease-in-out infinite;
+}
+
+@keyframes hd-note-float {
+  0% {
+    opacity: 0;
+    transform: translate(0, 4px) scale(0.7);
+  }
+  25% {
+    opacity: 0.95;
+  }
+  100% {
+    opacity: 0;
+    transform: translate(5px, -14px) scale(1.05);
+  }
+}
+.hd-music-note {
+  position: absolute;
+  font-size: 9px;
+  font-weight: 700;
+  pointer-events: none;
+  animation: hd-note-float 2.1s ease-out infinite;
+}
+
+/* 桌面磁吸对齐闪光提示（吸附瞬间沿对应边缘亮起一道极细青色光） */
+@keyframes hd-snap-flash {
+  0% {
+    opacity: 0;
+  }
+  20% {
+    opacity: 0.95;
+  }
+  100% {
+    opacity: 0;
+  }
+}
+.hd-snap-edge {
+  position: absolute;
+  pointer-events: none;
+  z-index: 30;
+  animation: hd-snap-flash 0.48s ease-out forwards;
+}
+
+/* 每日步数达标流光微效 */
+@keyframes hd-goal-shimmer {
+  0% {
+    transform: translateX(-120%);
+  }
+  45%,
+  100% {
+    transform: translateX(260%);
+  }
+}
+.hd-goal-bar-shimmer {
+  position: relative;
+  overflow: hidden;
+}
+.hd-goal-bar-shimmer::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  width: 45%;
+  background: linear-gradient(
+    90deg,
+    rgba(255, 255, 255, 0) 0%,
+    rgba(255, 255, 255, 0.38) 50%,
+    rgba(255, 255, 255, 0) 100%
+  );
+  animation: hd-goal-shimmer 4.5s ease-in-out infinite;
+  pointer-events: none;
 }
