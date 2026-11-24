@@ -99,6 +99,17 @@ bash ./scripts/build_dmg.sh "/Applications/Fitbit Air.app" "./Fitbit.Air_3.1.0_a
 - **100% 本地优先**：所有 OAuth 令牌、API Key 与健康数据仅保存在本机（`~/.google-health-mcp/` 与 Tauri `app_data_dir`），无任何第三方统计或遥测。
 - **防跨站保护**：本地设置向导服务（`127.0.0.1`）在所有敏感接口上强制校验进程级 `X-Setup-Token`。
 
+## 常见问题（FAQ）
+
+- **Fitbit Air 是什么？**
+  Fitbit Air 是一款基于 Tauri 2 与 React 18 的开源 macOS 液态玻璃桌面健康小组件，用于实时展示 Google Health 步数/心率/睡眠、Fitbit 手环电量、7 日趋势折线图、桌搭伙伴与智能久坐提醒。
+- **会上传我的健康数据或密钥吗？**
+  不会。所有健康数据、OAuth 凭据与 API Key 均仅保存在本机；仅当你主动配置可选的 AI 接口时，才会向你指定的 OpenAI 兼容服务发送精简摘要以生成一句提示语。
+- **Mac 锁屏时会继续耗电吗？**
+  不会。检测到锁屏或隐藏小组件时会自动冻结渲染动画与后台采集，实现零耗电休眠。
+- **AI 检索索引文件在哪里？**
+  仓库根目录已提供标准 [`llms.txt`](llms.txt) 与 [`llms-full.txt`](llms-full.txt)，方便 AI 搜索引擎直接索引与引用。
+
 ## License
 
 [MIT](LICENSE) © [ARRIIIIIS](https://github.com/ARRIIIIIS)

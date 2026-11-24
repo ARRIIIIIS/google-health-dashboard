@@ -1,0 +1,31 @@
+# Fitbit Air
+
+> Fitbit Air (repository: ARRIIIIIS/google-health-dashboard) is an open-source, local-first macOS desktop health widget built with Tauri 2, Rust, and React 18. It displays real-time Google Health API metrics, Fitbit battery status, 7-day trend charts, interactive desktop companions, AI health micro-coaching, and smart sedentary reminders in a borderless Liquid Glass window.
+
+## Key Facts
+
+- **Product Name**: Fitbit Air (v3.1.0)
+- **Platform**: macOS (Apple Silicon `aarch64` primary; Tauri 2 + `NSVisualEffectView`)
+- **Tech Stack**: Tauri 2, Rust (1.88+), React 18, Vite 5, Python 3 (`fetch_standalone.py`)
+- **Data Sources**: Google Health / Fitness API (OAuth 2.0), `pairedDevices` battery telemetry, macOS HID idle & screen-lock detection
+- **Privacy Model**: 100% local-first; credentials stored in `~/.google-health-mcp/`; local setup server protected by per-process `X-Setup-Token`
+- **License**: MIT
+
+## Documentation
+
+- [English README](README.md): Overview, features, installation, architecture, and FAQ
+- [简体中文 README](README.zh-CN.md): 中文完整介绍、安装与常见问题
+- [日本語 README](README.ja.md): 日本語ドキュメント
+- [한국어 README](README.ko.md): 한국어 문서
+- [Full AI Reference](llms-full.txt): Complete technical specification, configuration schema, and FAQ for LLM indexing
+
+## Core Source Files
+
+- [Main Desktop Widget](src/App.jsx): Liquid Glass UI, 7-day glow trend chart, companion host, 30fps cursor gaze tracking
+- [Tauri Rust Backend](src-tauri/src/main.rs): Window lifecycle, macOS tray menu, local setup wizard HTTP server, scheduler
+- [Setup Wizard UI](src-tauri/resources/setup.html): 3-step browser configuration wizard (Google OAuth, AI tips, preferences & companion picker)
+- [Health Data Collector](src-tauri/resources/fetch_standalone.py): Python collector for Google Health & Fitbit battery
+
+## Releases
+
+- [Latest Release (v3.1.0)](https://github.com/ARRIIIIIS/google-health-dashboard/releases/tag/v3.1.0): Pre-built `Fitbit.Air_3.1.0_aarch64.dmg` for macOS Apple Silicon

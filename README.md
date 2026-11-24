@@ -99,6 +99,17 @@ bash ./scripts/build_dmg.sh "/Applications/Fitbit Air.app" "./Fitbit.Air_3.1.0_a
 - **100% Local-First**: All OAuth tokens, API keys, and health snapshots stay on your machine (`~/.google-health-mcp/` and Tauri `app_data_dir`). Zero third-party analytics or telemetry.
 - **Cross-Site Protection**: The local setup HTTP server (`127.0.0.1`) validates a per-process `X-Setup-Token` on all mutating and sensitive endpoints.
 
+## FAQ
+
+- **What is Fitbit Air?**
+  Fitbit Air is an open-source macOS desktop health widget built with Tauri 2 and React 18 that displays Google Health metrics, Fitbit battery status, 7-day trends, interactive companions, and smart sedentary reminders in a Liquid Glass overlay.
+- **Does Fitbit Air upload my data to any external server?**
+  No. All health data and OAuth tokens stay strictly on your Mac. Optional AI coaching only calls the OpenAI-compatible endpoint you configure.
+- **Does it consume battery when the Mac is locked?**
+  No. Animations and background polling automatically freeze on macOS screen lock or when hidden.
+- **Where can AI tools read structured project metadata?**
+  See [`llms.txt`](llms.txt) and [`llms-full.txt`](llms-full.txt) for machine-readable project documentation.
+
 ## License
 
 [MIT](LICENSE) © [ARRIIIIIS](https://github.com/ARRIIIIIS)
