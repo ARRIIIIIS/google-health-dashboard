@@ -1,62 +1,104 @@
+<div align="center">
+
 # Fitbit Air
 
-macOS 桌面健康小组件：从 Google Health API 实时同步步数、心率、睡眠与手环电量，常驻桌面角落。基于 **Tauri 2 + React 18** 构建，透明无边框、不进 Dock、不抢焦点，采用 **Liquid Glass（液态玻璃）** 设计。
+**A translucent Liquid Glass desktop health widget for macOS — powered by Google Health API, Tauri 2, and React 18.**
 
-![Version](https://img.shields.io/badge/version-3.1.0-c1ff12)
-![Platform](https://img.shields.io/badge/platform-macOS%20(Apple%20Silicon)-blue)
-![License](https://img.shields.io/badge/license-MIT-green)
-![Rust](https://img.shields.io/badge/Rust-1.88%2B-orange)
-![Frontend](https://img.shields.io/badge/frontend-React%2018%20%2B%20Vite-61dafb)
+[English](README.md) · [简体中文](README.zh-CN.md) · [日本語](README.ja.md) · [한국어](README.ko.md)
 
-<p align="center">
-  <img src="assets/preview.jpg" alt="Fitbit Air 桌面小组件" width="380">
-</p>
+[![Version](https://img.shields.io/badge/version-3.1.0-c1ff12?style=flat-square)](https://github.com/ARRIIIIIS/google-health-dashboard/releases/tag/v3.1.0)
+[![Platform](https://img.shields.io/badge/platform-macOS%20(Apple%20Silicon)-0a84ff?style=flat-square)](#installation)
+[![Tauri](https://img.shields.io/badge/Tauri-2.0-24c8db?style=flat-square)](https://v2.tauri.app/)
+[![React](https://img.shields.io/badge/React-18-61dafb?style=flat-square)](https://react.dev/)
+[![Rust](https://img.shields.io/badge/Rust-1.88%2B-f74c00?style=flat-square)](https://www.rust-lang.org/)
+[![License](https://img.shields.io/badge/license-MIT-30d158?style=flat-square)](LICENSE)
 
-## 核心特性
+<br>
 
-- **液态玻璃小组件**：`24px` 圆角 + macOS 原生系统磨砂（`NSVisualEffectView`），自动跟随系统深浅色切换
-- **核心健康指标**：步数（自定义每日目标 `1,000 ~ 50,000`）、距离、卡路里、活跃分钟、实时/静息心率、累计静坐与今日运动
-- **手环电量与同步感知**：顶栏并排显示久坐计时与 Fitbit 手环电量（`≤25%` 低电量琥珀色高亮，超 2 小时未同步提示）
-- **7 日渐变发光折线图**：点击步数或心率区原地展开近 7 日趋势与均值对比，支持点击切换日期/星期与周末虚线衔接
-- **四位桌搭伙伴**：**球球 / 云宝 / 亮亮 / 钳钳**（支持每 3 分钟随机轮换），支持鼠标跟随与锁屏零耗电休眠
-- **AI 健康建议**：支持任意 OpenAI 兼容 API，结合时段、久坐、手环电量与伙伴人设生成 30 字以内口语化叮嘱（点击即换）
-- **智能久坐提醒**：结合步数变化与 macOS 键鼠空闲/锁屏感知，支持自定义生效时段、午休免打扰（`12:00–13:30`）、仅工作日提醒与跟随系统勿扰
-- **精简菜单栏 + 3 步设置向导**：菜单栏仅保留「桌搭伙伴 / 设置向导与偏好… / 重启 / 退出」；高定 3 步向导内置 Google OAuth 一键授权、LLM 延迟测试与全套偏好热更新
+<img src="assets/preview.jpg" alt="Fitbit Air macOS Desktop Widget" width="400">
 
-## 安装
+</div>
 
-前往 [Releases](https://github.com/ARRIIIIIS/google-health-dashboard/releases) 下载 `Fitbit.Air_3.1.0_aarch64.dmg`，拖入「应用程序」即可。
+---
 
-首次启动后点击菜单栏图标 → **设置向导与偏好…**，按 3 步完成配置（所有凭据仅保存在本机）：
+## Overview
 
-1. **Google 健康数据**：填写 Client ID / Secret → 一键授权 → 测试延迟 → **保存并下一步**
-2. **AI 健康建议**：选择服务商或自定义 OpenAI 兼容接口 → 测试延迟 → **保存并下一步**
-3. **偏好与作息**：可视化选择 **桌搭伙伴**，配置主题、语言、久坐作息、步数目标、开机自启与本地数据目录 → **保存并完成**
+**Fitbit Air** is a lightweight, borderless macOS desktop widget that stays quietly anchored on your desktop without appearing in the Dock or stealing window focus. Built with native macOS vibrancy (`NSVisualEffectView`) and a `24px` super-ellipse **Liquid Glass** surface, it keeps your daily movement, heart rate, Fitbit battery level, and sedentary rhythm visible at a glance.
 
-## 开发与构建
+## Key Features
+
+- **Liquid Glass Craft**: Authentic macOS frosted glass (`24px` radius) that automatically adapts to Light and Dark system appearances.
+- **Real-Time Health Telemetry**: Steps (with customizable daily goal `1,000 – 50,000`), distance, calories, active minutes, live/resting heart rate, HRV, SpO₂, and sleep stage distribution.
+- **Fitbit Battery & Sync Capsule**: Reads `pairedDevices` battery percentage in real time alongside your sedentary timer (`≤25%` amber low-battery alert; sync warning after 2h of inactivity).
+- **7-Day Smooth Glow Trend Chart**: Click the steps or heart rate area to expand an inline 7-day trend chart with bottom opacity fade, dashed weekend/missing-data bridging, and clickable date/weekday labels.
+- **Interactive Desktop Companions**: Four animated companions — **Qiuqiu**, **Nimbo**, **Twinkle**, and **Claw** (plus 3-minute auto-shuffle) — with 30fps cursor gaze tracking and automatic zero-power freeze on screen lock or hide.
+- **AI-Powered Micro-Coaching**: Connects to any OpenAI-compatible API to generate concise, persona-driven health nudges (<30 chars) with a 6-item deduplication memory. Click the tip anytime to refresh.
+- **Smart Sedentary Detection**: Combines step deltas with macOS HID idle / screen-lock awareness (never triggers false alerts while away), supporting custom active hours, lunch mute (`12:00–13:30`), workdays-only mode, and macOS Focus/DND sync.
+- **Streamlined Menu Bar & 3-Step Setup Wizard**: Menu bar stays minimal (**Companion**, **Settings & Preferences…**, **Restart**, **Quit**). All configuration lives in a local browser wizard secured by a per-process `X-Setup-Token`.
+
+## Installation
+
+1. Download **`Fitbit.Air_3.1.0_aarch64.dmg`** from [GitHub Releases](https://github.com/ARRIIIIIS/google-health-dashboard/releases/latest).
+2. Open the DMG and drag **`Fitbit Air.app`** into **Applications**.
+3. Launch the app and click the menu bar icon → **Settings & Preferences…** to complete the 3-step setup in your browser:
+   - **01 · Google Health Data**: Enter OAuth Client ID & Secret, authorize in one click, and test API latency.
+   - **02 · AI Health Tips** *(optional)*: Pick a provider or enter any OpenAI-compatible Base URL, API Key, and model name.
+   - **03 · Preferences & Schedule**: Visually pick your **Desktop Companion**, theme, language, sedentary schedule, daily step goal, launch at login, and local data directory.
+
+## Development & Build
+
+### Prerequisites
+
+- **macOS** (Apple Silicon recommended)
+- **Rust ≥ 1.88** (`rustup` stable; ensure `~/.cargo/bin` precedes Homebrew in `PATH`)
+- **Node.js ≥ 20** & **Python 3** (used by `fetch_standalone.py`)
+
+### Commands
 
 ```bash
+# Install frontend dependencies
 npm install
-npm run tauri dev          # 开发调试
-npm run install:mac        # 一键编译并安装到 /Applications/Fitbit Air.app
+
+# Run in development mode (Vite + Tauri)
+npm run tauri dev
+
+# Build and install cleanly to /Applications/Fitbit Air.app
+npm run install:mac
+
+# Package a styled DMG installer (requires built .app)
+bash ./scripts/build_dmg.sh "/Applications/Fitbit Air.app" "./Fitbit.Air_3.1.0_aarch64.dmg"
 ```
 
-> 依赖环境：Rust ≥ 1.88（`~/.cargo/bin` 需在 PATH 前部）、Node.js 20+、macOS Python 3。
+## Architecture
 
-## 目录结构
-
-```
+```text
 ├── assets/
-│   ├── preview.jpg        # 小组件实机截图
-│   └── dmg/               # DMG 安装画面背景与 Finder 布局
+│   ├── preview.jpg          # Widget preview screenshot
+│   └── dmg/                 # DMG installer background & Finder layout assets
 ├── scripts/
-│   ├── install_app.sh     # 编译并安装到 /Applications/Fitbit Air.app
-│   └── build_dmg.sh       # 打包带安装画面的 .dmg
-├── src/                   # React 18 前端（小组件 UI、7日趋势图、桌搭伙伴引擎）
-├── src-tauri/             # Tauri 2 Rust 后端（菜单栏、本地向导服务、采集调度）
-└── tests/                 # 采集脚本回归测试
+│   ├── install_app.sh       # Build & install clean single-instance .app
+│   ├── build_dmg.sh         # Create styled .dmg with fixed icon positions
+│   └── patch_dsstore.py     # Verify & pin Finder .DS_Store window geometry
+├── src/                     # React 18 + Vite frontend
+│   ├── App.jsx              # Liquid Glass widget, 7-day trend chart, companion host
+│   ├── SedPopover.jsx       # Sedentary reminder menu bar popover
+│   ├── i18n.js              # Localization strings (zh / en / ja)
+│   └── mood-mates/ & claw/  # Companion rendering engines & SVG assets
+├── src-tauri/               # Tauri 2 Rust backend
+│   ├── src/main.rs          # Window lifecycle, tray menu, local setup server, scheduler
+│   ├── resources/
+│   │   ├── fetch_standalone.py  # Google Health data collector
+│   │   └── setup.html           # 3-step local setup wizard
+│   ├── tauri.conf.json      # Tauri window & bundle configuration
+│   └── Cargo.toml
+└── tests/                   # Collector regression tests
 ```
+
+## Privacy & Security
+
+- **100% Local-First**: All OAuth tokens, API keys, and health snapshots stay on your machine (`~/.google-health-mcp/` and Tauri `app_data_dir`). Zero third-party analytics or telemetry.
+- **Cross-Site Protection**: The local setup HTTP server (`127.0.0.1`) validates a per-process `X-Setup-Token` on all mutating and sensitive endpoints.
 
 ## License
 
-MIT © [ARRIIIIIS](https://github.com/ARRIIIIIS)
+[MIT](LICENSE) © [ARRIIIIIS](https://github.com/ARRIIIIIS)
